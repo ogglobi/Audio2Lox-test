@@ -1,25 +1,18 @@
-name: Build and Push Docker Image
+name: Build and Push to DockerHub
 
 on:
   push:
     branches:
       - main
+      - master
   workflow_dispatch:
 
-env:
-  REGISTRY: docker.io
-  IMAGE_NAME: ogglobi/lox-audioserver
-
 jobs:
-  build-and-push:
+  build:
     runs-on: ubuntu-latest
     
-    permissions:
-      contents: read
-      packages: write
-
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
@@ -28,36 +21,20 @@ jobs:
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - name: Build and push Docker image
+      - name: Build and push to DockerHub
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+          tags: |
+            ogglobi/audio2lox:latest
+            ogglobi/audio2lox:${{ github.sha }}
 
-      - name: Notify on success
-        if: success()
-        run: echo "✅ Docker image pushed successfully to ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-
-      - name: Notify on failure
-        if: failure()
-        run: echo "❌ Docker build failed. Check logs above."
+      - name: Success message
+        run: |
+          echo "✅ Docker image successfully pushed to DockerHub!"
+          echo "Repository: ogglobi/audio2lox"
+          echo "Tags: latest, ${{ github.sha }}"
