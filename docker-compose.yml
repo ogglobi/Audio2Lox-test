@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  lox-audioserver:
+    image: YOUR_DOCKERHUB_USERNAME/lox-audioserver:latest
+    container_name: lox-audioserver
+    restart: unless-stopped
+    
+    # Use host network for mDNS discovery and proper audio routing
+    network_mode: host
+    
+    # Expose container ports (implicit with host network, but good for documentation)
+    ports:
+      - "7090:7090"
+      - "7091:7091"
+      - "7095:7095"
+    
+    # Device mappings for audio and USB relais
+    devices:
+      - /dev/snd:/dev/snd        # Sound device
+      - /dev/ttyUSB0:/dev/ttyUSB0 # USB Relais (adjust to ttyUSB1 if needed)
+    
+    # Environment configuration
+    environment:
+      # PowerManager Settings
+      PM_ENABLED: "true"
+      PM_USB_PORT: "/dev/ttyUSB0"      # Change to ttyUSB1 if needed
+      PM_USB_BAUD_RATE: "9600"
+      PM_CHANNEL: "1"                   # ARCELI channel (1-8)
+      PM_TURN_ON_AT_PLAY: "true"
+      PM_TURN_OFF_DELAY: "5"            # Delay in seconds before turning off
+      
+      # Node.js environment
+      NODE_ENV: "production"
+      LOG_LEVEL: "info"
+    
+    # Volume mappings
+    volumes:
+      - ./config:/app/config            # Persistent configuration
+      - ./logs:/app/logs                # Log files
+      - ./data:/app/data                # Persistent data
+    
+    # Resource limits (adjust to your hardware)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '1'
+          memory: 512M
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=lox-audioserver"
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

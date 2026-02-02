@@ -1,0 +1,211 @@
+╔════════════════════════════════════════════════════════════════════════════════╗
+║                        DOCKER-COMPOSE VORHER vs. NACHHER                        ║
+╚════════════════════════════════════════════════════════════════════════════════╝
+
+VORHER (Alt - OHNE PowerManager):
+──────────────────────────────────────────────────────────────────────────────────
+
+services:
+  loxoneaudioserver:
+    container_name: lox-audioserver
+    image: ghcr.io/rudyberends/lox-audioserver:latest
+    hostname: lox-audioserver
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - SYS_ADMIN
+      - DAC_READ_SEARCH
+
+
+    # ❌ KEIN devices!
+    # ❌ KEIN environment für PowerManager!
+
+    volumes:
+      - ./data:/app/data
+
+
+NACHHER (Neu - MIT PowerManager):
+──────────────────────────────────────────────────────────────────────────────────
+
+services:
+  loxoneaudioserver:
+    container_name: lox-audioserver
+    image: ghcr.io/rudyberends/lox-audioserver:latest
+    hostname: lox-audioserver
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - SYS_ADMIN
+      - DAC_READ_SEARCH
+    
+    # ✅ NEU: USB Devices
+    devices:
+      - /dev/snd:/dev/snd
+      - /dev/ttyUSB0:/dev/ttyUSB0
+    
+    # ✅ NEU: PowerManager Umgebungsvariablen
+    environment:
+      PM_ENABLED: "true"
+      PM_USB_PORT: "/dev/ttyUSB0"
+      PM_USB_BAUD_RATE: "9600"
+      PM_CHANNEL: "1"
+      PM_TURN_ON_AT_PLAY: "true"
+      PM_TURN_OFF_DELAY: "5"
+
+    volumes:
+      - ./data:/app/data
+
+
+─────────────────────────────────────────────────────────────────────────────────
+
+UNTERSCHIEDE ZUSAMMENGEFASST:
+────────────────────────────────────────────────────────────────────────────────
+
+┌─ HINZUGEFÜGT ─────────────────────────────────────────────────────────────────┐
+│                                                                                │
+│  1. devices Sektion mit 2 Zeilen:                                             │
+│     - /dev/snd:/dev/snd              (Soundkarte)                             │
+│     - /dev/ttyUSB0:/dev/ttyUSB0      (USB Relais)                             │
+│                                                                                │
+│  2. environment Sektion mit 6 PowerManager Variablen:                          │
+│     - PM_ENABLED: "true"                                                      │
+│     - PM_USB_PORT: "/dev/ttyUSB0"                                              │
+│     - PM_USB_BAUD_RATE: "9600"                                                │
+│     - PM_CHANNEL: "1"                                                         │
+│     - PM_TURN_ON_AT_PLAY: "true"                                              │
+│     - PM_TURN_OFF_DELAY: "5"                                                  │
+│                                                                                │
+└────────────────────────────────────────────────────────────────────────────────┘
+
+─────────────────────────────────────────────────────────────────────────────────
+
+COPY-PASTE VORLAGE (vollständig):
+────────────────────────────────────────────────────────────────────────────────
+
+Einfach die ganze Datei mit folgendem Inhalt ersetzen:
+
+═══════════════════════════════════════════════════════════════════════════════
+
+version: '3.8'
+
+services:
+  loxoneaudioserver:
+    container_name: lox-audioserver
+    image: ghcr.io/rudyberends/lox-audioserver:latest
+    hostname: lox-audioserver
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - SYS_ADMIN
+      - DAC_READ_SEARCH
+    
+    devices:
+      - /dev/snd:/dev/snd
+      - /dev/ttyUSB0:/dev/ttyUSB0
+    
+    environment:
+      PM_ENABLED: "true"
+      PM_USB_PORT: "/dev/ttyUSB0"
+      PM_USB_BAUD_RATE: "9600"
+      PM_CHANNEL: "1"
+      PM_TURN_ON_AT_PLAY: "true"
+      PM_TURN_OFF_DELAY: "5"
+    
+    volumes:
+      - ./data:/app/data
+
+═══════════════════════════════════════════════════════════════════════════════
+
+─────────────────────────────────────────────────────────────────────────────────
+
+SCHRITT-FÜR-SCHRITT ANPASSUNG:
+────────────────────────────────────────────────────────────────────────────────
+
+1️⃣  Datei öffnen:
+    $ cd lox-audioserver-beta
+    $ code docker-compose.yml
+
+2️⃣  Nach Zeile "cap_add:" suchen (sollte Zeile ~14 sein)
+
+3️⃣  Nach den cap_add Zeilen folgendes EINFÜGEN:
+    
+    (leere Zeile)
+    devices:
+      - /dev/snd:/dev/snd
+      - /dev/ttyUSB0:/dev/ttyUSB0
+    
+    (leere Zeile)
+    environment:
+      PM_ENABLED: "true"
+      PM_USB_PORT: "/dev/ttyUSB0"
+      PM_USB_BAUD_RATE: "9600"
+      PM_CHANNEL: "1"
+      PM_TURN_ON_AT_PLAY: "true"
+      PM_TURN_OFF_DELAY: "5"
+
+4️⃣  Speichern (Ctrl+S)
+
+5️⃣  Im Terminal:
+    $ docker-compose up -d
+
+6️⃣  Logs überprüfen:
+    $ docker-compose logs -f lox-audioserver | grep -i power
+
+7️⃣  Sehen Sie diese Nachricht? Dann ist's richtig:
+    [PowerManagement] USB Relais connected
+
+─────────────────────────────────────────────────────────────────────────────────
+
+WICHTIGE PUNKTE ZUM MERKEN:
+────────────────────────────────────────────────────────────────────────────────
+
+✅ MUSS SO SEIN:
+  • devices: (folgende Zeilen mit 2 Spaces einrücken!)
+  • environment: (folgende Zeilen mit 2 Spaces einrücken!)
+  • Alle Werte in Anführungszeichen: "true", "9600", etc.
+  • Keine Tabs! Nur Spaces!
+  • Doppelpunkt nach dem Schlüssel: PM_ENABLED:
+
+❌ HÄUFIGE FEHLER:
+  • Falsche Einrückung → docker-compose schlägt fehl
+  • Tabs statt Spaces → YAML-Fehler
+  • Fehlende Anführungszeichen → Parser-Error
+  • Falscher Port: "ttyUSB0" statt "/dev/ttyUSB0" → PowerManager findet Gerät nicht
+
+─────────────────────────────────────────────────────────────────────────────────
+
+QUICK-CHECK (haben Sie alles richtig gemacht?):
+────────────────────────────────────────────────────────────────────────────────
+
+Nach docker-compose up -d können Sie prüfen:
+
+  $ docker-compose logs -f
+
+Erfolg Zeichen:
+  ✅ "[PowerManagement] USB Relais connected"
+  ✅ "Relay turned ON" (wenn Sie Musik spielen)
+  ✅ "Relay turned OFF" (nach 5 Sekunden wenn Sie stoppen)
+
+Fehler Zeichen:
+  ❌ "Failed to initialize USB Relais" → Port überprüfen
+  ❌ "docker-compose: YAML error" → Einrückung überprüfen
+  ❌ "ENOENT" → /dev/ttyUSB0 nicht vorhanden → lsusb prüfen
+
+─────────────────────────────────────────────────────────────────────────────────
+
+FALLS NOCH FRAGEN AUFTAUCHEN:
+
+1. Lesen Sie: docs/DOCKER_COMPOSE_ANPASSUNG.txt (diese Datei!)
+2. Schauen Sie: docker-compose logs -f
+3. Prüfen Sie: ls -la /dev/ttyUSB* (ist das Relais da?)
+
+Fertig! 🎉
