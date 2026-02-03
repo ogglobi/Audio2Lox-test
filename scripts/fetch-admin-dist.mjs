@@ -17,6 +17,7 @@ const distUrl =
 
 const targetDir = join(process.cwd(), 'public', 'admin');
 const customIndexPath = join(targetDir, 'index.html.custom');
+const pluginSourcePath = join(process.cwd(), 'public', 'admin', 'audio-config-plugin.js');
 const archivePath = join(tmpdir(), `admin-dist-${Date.now()}.tgz`);
 
 async function download(url, dest, redirects = 0) {
@@ -64,6 +65,15 @@ async function extract(archive, dest) {
   });
 }
 
+// Backup plugin file before deletion
+let pluginCode = null;
+try {
+  pluginCode = await fs.readFile(pluginSourcePath, 'utf-8');
+  console.log('✓ Backed up plugin code');
+} catch (e) {
+  console.warn('⚠ Plugin file not found, will skip restoration');
+}
+
 // Backup custom index.html if it exists
 let customIndexContent = null;
 try {
@@ -84,8 +94,50 @@ await download(distUrl, archivePath);
 await extract(archivePath, targetDir);
 await fs.rm(archivePath, { force: true });
 
+// Inject Audio Config Plugin into downloaded index.html - MUST HAPPEN BEFORE PLUGIN RESTORE
+async function addPluginLoaderToIndex() {
+  const indexPath = join(targetDir, 'index.html');
+  let indexContent = await fs.readFile(indexPath, 'utf-8');
+  
+  // Add plugin loader before closing body
+  const loaderScript = `    <!-- Load Audio Config Plugin -->
+    <script>
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => {
+                setTimeout(() => {
+                    const script = document.createElement('script');
+                    script.src = '/admin/audio-config-plugin.js';
+                    document.body.appendChild(script);
+                }, 500);
+            });
+        } else {
+            setTimeout(() => {
+                const script = document.createElement('script');
+                script.src = '/admin/audio-config-plugin.js';
+                document.body.appendChild(script);
+            }, 500);
+        }
+    </script>`;
+  
+  if (indexContent.includes('</body>')) {
+    indexContent = indexContent.replace('  </body>', loaderScript + '\n  </body>');
+    await fs.writeFile(indexPath, indexContent, 'utf-8');
+    console.log('✓ Added plugin loader to index.html');
+  } else {
+    console.warn('⚠ Could not find </body> in index.html');
+  }
+}
+
+await addPluginLoaderToIndex();
+
 // Restore custom index.html if it was backed up
 if (customIndexContent) {
   await fs.writeFile(join(targetDir, 'index.html'), customIndexContent, 'utf-8');
   console.log('✓ Restored custom Audio Config index.html');
+}
+
+// Restore plugin file
+if (pluginCode) {
+  await fs.writeFile(pluginSourcePath, pluginCode, 'utf-8');
+  console.log('✓ Restored plugin code');
 }

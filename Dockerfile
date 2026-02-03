@@ -1,6 +1,7 @@
 # Stage 1: Install dependencies and build the project
 FROM node:24-bookworm-slim AS builder
 WORKDIR /app
+# Cache bust: 2026-02-03 22:51 UTC
 COPY package*.json ./
 
 # Install minimal build tooling (prebuilds should handle most deps on glibc)
