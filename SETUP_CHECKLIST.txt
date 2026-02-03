@@ -1,0 +1,133 @@
+================================================================================
+  📋 AUDIO2LOX DEPLOYMENT CHECKLIST
+================================================================================
+
+VORBEREITUNGEN (einmalig):
+
+  GitHub:
+    [ ] GitHub Repository "Audio2Lox" oder ähnlich erstellt
+    [ ] Repository ist PUBLIC
+    [ ] Settings → Secrets hinzugefügt:
+        - DOCKERHUB_USERNAME = dein DockerHub Username
+        - DOCKERHUB_TOKEN = dein DockerHub Personal Access Token
+
+  DockerHub:
+    [ ] DockerHub Repository "lox-audioserver" erstellt
+    [ ] Repository ist PUBLIC
+    [ ] Personal Access Token generiert (https://hub.docker.com/settings/security)
+
+  Unraid Server:
+    [ ] SSH Zugang funktioniert
+    [ ] Docker installiert und funktioniert
+
+================================================================================
+
+DATEIEN VORBEREITEN (in diesem Verzeichnis):
+
+  [ ] .github/workflows/docker-publish.yml überprüft
+  [ ] .dockerignore überprüft
+  [ ] Dockerfile überprüft
+  [ ] docker-compose.yml überprüft
+  [ ] .env.example überprüft
+
+================================================================================
+
+USERNAMES ERSETZEN (WICHTIG!):
+
+  In folgenden Dateien: "YOUR_DOCKERHUB_USERNAME" ersetzen
+
+    [ ] docker-compose.yml (Zeile ~7)
+          image: YOUR_DOCKERHUB_USERNAME/lox-audioserver:latest
+          → image: [dein_username]/lox-audioserver:latest
+
+    [ ] .github/workflows/docker-publish.yml (Zeile ~9)
+          IMAGE_NAME: YOUR_DOCKERHUB_USERNAME/lox-audioserver
+          → IMAGE_NAME: [dein_username]/lox-audioserver
+
+================================================================================
+
+GIT PUSH (vom Windows PC):
+
+  [ ] Ins Verzeichnis wechseln:
+      cd C:\Zwischenspeicher\VSCode Workfolder\wip\lox-audioserver-beta
+
+  [ ] Dateien hinzufügen:
+      git add Dockerfile .dockerignore docker-compose.yml .github/ .env.example
+
+  [ ] Commit:
+      git commit -m "Add Docker configuration and GitHub Actions workflow"
+
+  [ ] Push:
+      git push origin main
+
+  [ ] GitHub Actions überprüfen:
+      → GitHub Repository → Actions Tab
+      → Sollte "Build and Push Docker Image" Workflow zeigen
+      → Warte auf grünes Häkchen (5-10 Min)
+
+================================================================================
+
+UNRAID DEPLOYMENT:
+
+  [ ] SSH zu Unraid verbinden:
+      ssh root@[deine_unraid_ip]
+
+  [ ] Verzeichnis erstellen:
+      mkdir -p /mnt/user/appdata/Audio2Lox/config
+      mkdir -p /mnt/user/appdata/Audio2Lox/logs
+      mkdir -p /mnt/user/appdata/Audio2Lox/data
+
+  [ ] docker-compose.yml in das Verzeichnis kopieren:
+      cd /mnt/user/appdata/Audio2Lox
+      wget https://raw.githubusercontent.com/[username]/[repo]/main/docker-compose.yml
+      
+      ODER: Manuell (nano docker-compose.yml) und einfügen
+
+  [ ] docker-compose.yml überprüfen:
+      - USERNAME nochmal überprüft?
+      - /dev/ttyUSB0 ist richtig? (ls -la /dev/ttyUSB*)
+      - Falls USB1: ttyUSB0 → ttyUSB1
+
+  [ ] Container starten:
+      docker-compose pull
+      docker-compose up -d
+
+  [ ] Logs überprüfen:
+      docker-compose logs -f
+
+  [ ] Auf Success-Message warten:
+      [PowerManagement] USB Relais connected ✅
+
+================================================================================
+
+OPTIONAL - TESTEN:
+
+  [ ] Musik starten in Loxone
+  [ ] Relais sollte klicken (Sound hörbar!)
+  [ ] Musik stoppen
+  [ ] Nach 5 Sekunden: Relais klickt nochmal (OFF)
+
+================================================================================
+
+ERFOLG CHECKLISTE:
+
+  [ ] GitHub Actions zeigt grünes Häkchen
+  [ ] Docker Image auf DockerHub vorhanden
+  [ ] docker-compose ps zeigt Container "UP"
+  [ ] docker-compose logs zeigt keine Errors
+  [ ] "[PowerManagement] USB Relais connected" in Logs
+  [ ] Web-Interface erreichbar: http://[unraid_ip]:7090
+
+================================================================================
+
+FERTIG! 🎉
+
+Ab jetzt:
+  1. Änderungen lokal machen
+  2. git push (auf Windows PC)
+  3. GitHub baut automatisch (5-10 Min)
+  4. docker-compose pull (auf Unraid)
+  5. docker-compose down && docker-compose up -d
+  6. Fertig!
+
+================================================================================

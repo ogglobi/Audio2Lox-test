@@ -1,0 +1,78 @@
+⚠️  WICHTIG - QUELLCODE KOPIEREN!
+
+Der Audio2Lox-test Ordner enthält jetzt:
+
+✅ FERTIG (Configuration Files):
+  ✓ .github/workflows/docker-publish.yml
+  ✓ Dockerfile
+  ✓ docker-compose.yml
+  ✓ .dockerignore
+  ✓ .env.example
+  ✓ package.json
+  ✓ tsconfig.json
+  ✓ .gitignore
+  ✓ eslint.config.js
+  ✓ prettier.config.cjs
+  ✓ nodemon.json
+  ✓ .dependency-cruiser.cjs
+  ✓ .editorconfig
+  ✓ tsc-alias.json
+  ✓ LICENSE
+  ✓ README.md
+  ✓ STRUKTUR.md
+  ✓ DEPLOYMENT_GUIDE.md
+  ✓ SETUP_CHECKLIST.txt
+
+❌ NOCH ZU KOPIEREN (Source Code):
+  ✗ src/               ← Gesamtes Verzeichnis aus lox-audioserver-beta
+  ✗ tests/             ← Test Dateien
+  ✗ public/            ← Static files
+  ✗ scripts/           ← Andere scripts (fetch-admin-dist.mjs schon vorhanden)
+
+═══════════════════════════════════════════════════════════════════════════════
+
+LÖSUNG: Manuell kopieren oder Git verwenden!
+
+Option 1: Mit Windows Explorer (einfach)
+─────────────────────────────────────────
+1. Öffne: C:\Zwischenspeicher\VSCode Workfolder\wip\lox-audioserver-beta
+2. Wähle: src/, tests/, public/ Ordner
+3. Kopiere (Ctrl+C)
+4. Paste in: C:\Zwischenspeicher\VSCode Workfolder\wip\Audio2Lox-test (Ctrl+V)
+
+Option 2: Mit Git (für GitHub)
+──────────────────────────────
+1. Gehe in dein GitHub Repo (Audio2Lox)
+2. Lade von lox-audioserver herunter:
+   https://github.com/rudyberends/lox-audioserver
+3. Kopiere src/, tests/, public/ dort rein
+4. Commit und Push
+
+Option 3: Mit PowerShell
+────────────────────────
+```powershell
+$source = "C:\Zwischenspeicher\VSCode Workfolder\wip\lox-audioserver-beta"
+$dest = "C:\Zwischenspeicher\VSCode Workfolder\wip\Audio2Lox-test"
+
+Copy-Item -Path "$source\src" -Destination "$dest" -Recurse
+Copy-Item -Path "$source\tests" -Destination "$dest" -Recurse
+Copy-Item -Path "$source\public" -Destination "$dest" -Recurse
+Copy-Item -Path "$source\scripts" -Destination "$dest" -Recurse -Force
+```
+
+═══════════════════════════════════════════════════════════════════════════════
+
+NÄCHSTE SCHRITTE:
+
+1. ✅ Konfigurationsdateien sind alle ready
+2. ✅ Dockerfile ist optimiert
+3. ✅ GitHub Actions Workflow ist konfiguriert
+4. ✅ docker-compose.yml ist ready
+5. ⏳ JETZT: src/, tests/, public/ kopieren
+6. ⏳ Dann: Alle Usernames ersetzen
+7. ⏳ Dann: Zu GitHub pushen
+8. ⏳ Dann: Auf Unraid deployen
+
+═══════════════════════════════════════════════════════════════════════════════
+
+Sag mir wenn du fertig kopiert hast! Dann mach ich eine finale Checkliste.
