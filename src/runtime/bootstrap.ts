@@ -17,6 +17,7 @@ import { createOutputsAdapter } from '@/adapters/outputs/OutputsAdapter';
 import type { OutputPorts } from '@/adapters/outputs/outputPorts';
 import { EngineAdapter } from '@/adapters/engine/EngineAdapter';
 import { AudioStreamEngine } from '@/engine/audioStreamEngine';
+import { ZoneManager } from '@/application/zones/zoneManager';
 import { createZoneManager, type ZoneManagerFacade } from '@/application/zones/createZoneManager';
 import type { AudioServerConfig } from '@/domain/config/types';
 import { PlaybackService } from '@/application/playback/PlaybackService';
@@ -211,16 +212,19 @@ export function createRuntime(): Runtime {
     spotifyDeviceRegistry,
   };
   const outputsAdapter = createOutputsAdapter(outputPorts);
-  const zoneManager = createZoneManager({
-    notifier: ports.notifier,
-    inputs: inputsAdapter,
-    outputs: outputsAdapter,
-    content: contentAdapter,
-    config: configPort,
-    recents: recentsManager,
+  // Create ZoneManager directly so we can access playbackCoordinator for PowerManagement
+  const zoneManagerInstance = new ZoneManager(
+    ports.notifier,
+    inputsAdapter,
+    outputsAdapter,
+    contentAdapter,
+    configPort,
+    recentsManager,
     audioManager,
-    mixedGroup: mixedGroupController,
-  });
+    mixedGroupController,
+  );
+  // Also use it as the facade for other services
+  const zoneManager = zoneManagerInstance as ZoneManagerFacade;
   zoneManagerRef = zoneManager;
   lineInMetadataService.initOnce({ zoneManager, configPort });
   snapcastCore.initOnce({ zoneManager });
@@ -320,9 +324,13 @@ export function createRuntime(): Runtime {
           turnOffAfterStopDelay: parseInt(process.env.PM_TURN_OFF_DELAY || '5', 10),
         });
         await usbRelayManager.initialize();
-        // powerManagementService = new PowerManagementService(usbRelayManager, zoneManager.getPlaybackCoordinator());
-        // powerManagementService.start();
-        log.info('PowerManagement service initialized (disabled)');
+        // Get playback coordinator from zoneManager instance
+        powerManagementService = new PowerManagementService(
+          usbRelayManager,
+          (zoneManagerInstance as any).playbackCoordinator,
+        );
+        powerManagementService.start();
+        log.info('PowerManagement service initialized');
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         log.error('Failed to initialize PowerManagement service', { message });
