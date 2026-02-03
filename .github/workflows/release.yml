@@ -1,0 +1,154 @@
+name: Release
+
+on:
+  release:
+    types:
+      - published
+  push:
+    branches:
+      - testing
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    if: ${{ github.event_name == 'release' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+      - name: Pin npm
+        run: |
+          corepack enable
+          corepack prepare npm@11.8.0 --activate
+          npm -v
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+
+      - name: Define release build metadata
+        id: release_meta
+        shell: bash
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${{ github.event.release.prerelease }}" >> "$GITHUB_OUTPUT"
+
+      - name: Define Docker tags
+        id: tags
+        shell: bash
+        run: |
+          if [ "${{ steps.release_meta.outputs.prerelease }}" = "true" ]; then
+            echo "tags=ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.release_meta.outputs.version }},ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:beta,ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:beta-latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "tags=ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.release_meta.outputs.version }},ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            BUILD_VERSION=${{ steps.release_meta.outputs.version }}
+
+  testing:
+    if: ${{ github.ref_name == 'testing' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+      - name: Pin npm
+        run: |
+          corepack enable
+          corepack prepare npm@11.8.0 --activate
+          npm -v
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Define testing build metadata
+        id: testing_meta
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          BUILD_TS=$(date -u +%Y%m%d%H%M%S)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build_ts=$BUILD_TS" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push Docker image (testing)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:testing,ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:testing-latest,ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:testing-${{ steps.testing_meta.outputs.build_ts }}
+          build-args: |
+            BUILD_VERSION=${{ steps.testing_meta.outputs.version }}
+            BUILD_TIMESTAMP=${{ steps.testing_meta.outputs.build_ts }}

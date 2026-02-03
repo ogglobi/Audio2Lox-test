@@ -1,0 +1,51 @@
+🚀 DOCKER-COMPOSE ANPASSUNG - SUPER KURZ
+
+═══════════════════════════════════════════════════════════════════════════════
+
+DATEI: docker-compose.yml im lox-audioserver-beta Verzeichnis
+
+┌─ NUR DIESE 2 SECTIONS HINZUFÜGEN ─────────────────────────────────────────┐
+│                                                                             │
+│ Nach Zeile "cap_add:" folgendes einfügen:                                  │
+│                                                                             │
+│ ┌ SECTION 1 ┐                                                              │
+│ devices:                                                                    │
+│   - /dev/snd:/dev/snd                                                       │
+│   - /dev/ttyUSB0:/dev/ttyUSB0                                               │
+│                                                                             │
+│ ┌ SECTION 2 ┐                                                              │
+│ environment:                                                                │
+│   PM_ENABLED: "true"                                                        │
+│   PM_USB_PORT: "/dev/ttyUSB0"                                               │
+│   PM_USB_BAUD_RATE: "9600"                                                 │
+│   PM_CHANNEL: "1"                                                           │
+│   PM_TURN_ON_AT_PLAY: "true"                                                │
+│   PM_TURN_OFF_DELAY: "5"                                                   │
+│                                                                             │
+│ ⚠️ WICHTIG: Einrückung mit 2 SPACES (nicht Tabs!)                         │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════
+
+FALLS RELAIS AUF USB PORT 1 IST (statt 0):
+
+  Ändern Sie überall "ttyUSB0" zu "ttyUSB1":
+  - /dev/ttyUSB1:/dev/ttyUSB1
+  PM_USB_PORT: "/dev/ttyUSB1"
+
+═══════════════════════════════════════════════════════════════════════════════
+
+DANACH:
+
+  $ npm install
+  $ npm run build
+  $ docker-compose up -d
+  $ docker-compose logs -f
+
+Sollte zeigen:
+  ✅ "[PowerManagement] USB Relais connected"
+
+═══════════════════════════════════════════════════════════════════════════════
+
+FERTIG! 🎉

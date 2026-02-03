@@ -1,0 +1,47 @@
+services:
+  loxoneaudioserver:
+    container_name: lox-audioserver
+    image: ghcr.io/rudyberends/lox-audioserver:latest
+    hostname: lox-audioserver
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    restart: unless-stopped
+    
+    # Port-Mapping für Windows/Mac (network_mode: host funktioniert nur auf Linux)
+    ports:
+      - "7090:7090"   # HTTP API und Admin UI
+      - "7091:7091"   # Loxone Server
+      - "7095:7095"   # Loxone Server
+      - "7080:7080"   # Line-In Ingest
+      - "1704:1704"   # Snapcast
+      - "3483:3483"   # SlimProto
+      - "9090:9090"   # LMS CLI (Telnet)
+      - "9000:9000"   # LMS JSON-RPC
+    
+    # Für Linux: uncommenten und network_mode: host setzen
+    # network_mode: host
+    
+    # privileged caps (and security-opt) needed to mount smb folders within the container
+    cap_add:
+      - SYS_ADMIN
+      - DAC_READ_SEARCH
+    
+    # USB Devices für Audio und Relais (Linux only - auskommentiert für Windows)
+    # devices:
+    #   - /dev/snd:/dev/snd      # Audio/Soundkarte
+    #   - /dev/ttyUSB0:/dev/ttyUSB0  # USB Relais (ggf. anpassen: ttyUSB1, COM3 unter Windows)
+    
+    # USB Relais PowerManager Konfiguration
+    environment:
+      # PowerManager Einstellungen
+      PM_ENABLED: "true"
+      PM_USB_PORT: "/dev/ttyUSB0"    # USB Port des Relais (Linux: /dev/ttyUSB*, Windows: COM3, etc.)
+      PM_USB_BAUD_RATE: "9600"       # Standard für ARCELI Relais
+      PM_CHANNEL: "1"                 # Relais Kanal: 1-4
+      PM_TURN_ON_AT_PLAY: "true"     # Relais einschalten bei Musik
+      PM_TURN_OFF_DELAY: "5"         # Sekunden bis Relais nach Stop ausschaltet
+    
+    # Persistente Daten
+    volumes:
+      - ./data:/app/data     # Config, Logs, Cache
