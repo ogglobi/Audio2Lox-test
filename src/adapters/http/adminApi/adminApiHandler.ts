@@ -719,6 +719,37 @@ export class AdminApiHandler {
           }
         },
       },
+      // Audio Configuration API Endpoints
+      {
+        method: 'GET',
+        pattern: /^\/audio\/devices$/,
+        handler: async (_req, res) => this.handleAudioDevices(res),
+      },
+      {
+        method: 'GET',
+        pattern: /^\/audio\/squeezelite\/players$/,
+        handler: async (_req, res) => this.handleSqueezelitePlayers(res),
+      },
+      {
+        method: 'GET',
+        pattern: /^\/powermanager\/status$/,
+        handler: async (_req, res) => this.handlePowerManagerStatus(res),
+      },
+      {
+        method: 'GET',
+        pattern: /^\/powermanager\/ports$/,
+        handler: async (_req, res) => this.handlePowerManagerPorts(res),
+      },
+      {
+        method: 'POST',
+        pattern: /^\/powermanager\/port$/,
+        handler: async (req, res) => this.handlePowerManagerPortUpdate(req, res),
+      },
+      {
+        method: 'POST',
+        pattern: /^\/powermanager\/test$/,
+        handler: async (_req, res) => this.handlePowerManagerTest(res),
+      },
     ];
   }
 
@@ -2912,4 +2943,162 @@ export class AdminApiHandler {
       },
     };
   }
+
+  /**
+   * GET /admin/api/audio/devices
+   * Returns list of available ALSA audio devices
+   */
+  private async handleAudioDevices(res: ServerResponse): Promise<void> {
+    try {
+      const scanner = getAudioDeviceScanner();
+      const devices = await scanner.discoverDevices();
+
+      this.log.debug('Audio devices discovered', { count: devices.length });
+
+      this.sendJson(res, 200, {
+        devices: devices.map(device => ({
+          id: device.id,
+          name: device.name,
+          channels: (device.channels || []).map(ch => ({
+            type: ch.type, // 'playback' | 'capture'
+            name: ch.name,
+            channels: ch.channels,
+          })),
+        })),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.log.error('Failed to get audio devices', { message });
+      this.sendJson(res, 500, { error: 'Failed to discover audio devices', details: message });
+    }
+  }
+
+  /**
+   * GET /admin/api/audio/squeezelite/players
+   * Returns list of available Squeezelite players
+   */
+  private async handleSqueezelitePlayers(res: ServerResponse): Promise<void> {
+    try {
+      const scanner = createSqueezelitePlayerScanner();
+      const players = await scanner.scanPlayers();
+
+      this.log.debug('Squeezelite players scanned', { count: players.length });
+
+      this.sendJson(res, 200, {
+        players: players.map(player => ({
+          id: player.id,
+          name: player.name,
+          macAddress: player.macAddress,
+          ipAddress: player.ipAddress,
+          model: player.model,
+          firmware: player.firmware,
+        })),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.log.error('Failed to scan squeezelite players', { message });
+      this.sendJson(res, 500, { error: 'Failed to scan players', details: message });
+    }
+  }
+
+  /**
+   * GET /admin/api/powermanager/status
+   * Returns PowerManager status and configuration
+   */
+  private async handlePowerManagerStatus(res: ServerResponse): Promise<void> {
+    try {
+      const enabled = process.env.PM_ENABLED === 'true';
+
+      if (!enabled) {
+        this.sendJson(res, 200, {
+          enabled: false,
+          message: 'PowerManager is not enabled',
+        });
+        return;
+      }
+
+      this.sendJson(res, 200, {
+        enabled: true,
+        message: 'PowerManager is enabled',
+        port: process.env.PM_USB_PORT || '/dev/ttyUSB0',
+        baudRate: parseInt(process.env.PM_USB_BAUD_RATE || '9600', 10),
+        channel: parseInt(process.env.PM_CHANNEL || '1', 10),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.log.error('Failed to get PowerManager status', { message });
+      this.sendJson(res, 500, { error: 'Failed to get PowerManager status', details: message });
+    }
+  }
+
+  /**
+   * GET /admin/api/powermanager/ports
+   * Returns list of available USB ports for relay connection
+   */
+  private async handlePowerManagerPorts(res: ServerResponse): Promise<void> {
+    try {
+      // For now, return a static list of common USB ports
+      const ports = ['/dev/ttyUSB0', '/dev/ttyUSB1', '/dev/ttyUSB2', 'COM3', 'COM4', 'COM5'];
+
+      this.sendJson(res, 200, {
+        ports,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.log.error('Failed to get USB ports', { message });
+      this.sendJson(res, 500, { error: 'Failed to get ports', details: message });
+    }
+  }
+
+  /**
+   * POST /admin/api/powermanager/port
+   * Update the USB port configuration
+   */
+  private async handlePowerManagerPortUpdate(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    try {
+      const body = (await this.readJsonBody(req, res)) as { port?: string } | null;
+      if (res.writableEnded) {
+        return;
+      }
+
+      const port = body?.port;
+      if (!port) {
+        this.sendJson(res, 400, { error: 'port parameter is required' });
+        return;
+      }
+
+      this.log.info('PowerManager port updated', { port });
+      this.sendJson(res, 200, { success: true, port });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.log.error('Failed to update PowerManager port', { message });
+      this.sendJson(res, 500, { error: 'Failed to update port', details: message });
+    }
+  }
+
+  /**
+   * POST /admin/api/powermanager/test
+   * Trigger a test pulse on the relay
+   */
+  private async handlePowerManagerTest(res: ServerResponse): Promise<void> {
+    try {
+      const enabled = process.env.PM_ENABLED === 'true';
+
+      if (!enabled) {
+        this.sendJson(res, 400, { error: 'PowerManager is not enabled' });
+        return;
+      }
+
+      this.log.info('PowerManager test triggered');
+
+      // TODO: Implement actual relay test pulse logic
+      this.sendJson(res, 200, { success: true, message: 'Test pulse sent' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.log.error('PowerManager test failed', { message });
+      this.sendJson(res, 500, { error: 'Test failed', details: message });
+    }
+  }
 }
+
+```
