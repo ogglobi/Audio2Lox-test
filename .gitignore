@@ -124,3 +124,6 @@ public/.DS_Store
 public/alerts/cache
 .DS_Store
 public/admin
+
+# But DO track the audio config plugin
+!public/admin/audio-config-plugin.js
