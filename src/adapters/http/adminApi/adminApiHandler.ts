@@ -2951,7 +2951,7 @@ export class AdminApiHandler {
   private async handleAudioDevices(res: ServerResponse): Promise<void> {
     try {
       const scanner = getAudioDeviceScanner();
-      const devices = await scanner.discoverDevices();
+      const devices = await scanner.getDevices();
 
       this.log.debug('Audio devices discovered', { count: devices.length });
 
@@ -2959,10 +2959,12 @@ export class AdminApiHandler {
         devices: devices.map(device => ({
           id: device.id,
           name: device.name,
+          longName: device.longName,
+          driver: device.driver,
           channels: (device.channels || []).map(ch => ({
-            type: ch.type, // 'playback' | 'capture'
+            id: ch.id,
             name: ch.name,
-            channels: ch.channels,
+            direction: ch.direction,
           })),
         })),
       });
