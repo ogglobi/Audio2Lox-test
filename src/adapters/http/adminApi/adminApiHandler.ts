@@ -49,7 +49,7 @@ import type { SnapcastCore } from '@/adapters/outputs/snapcast/snapcastCore';
 import type { ZoneManagerFacade } from '@/application/zones/createZoneManager';
 import type { SpotifyServiceManagerProvider } from '@/adapters/content/providers/spotifyServiceManager';
 import type { SqueezeliteCore } from '@/adapters/outputs/squeezelite/squeezeliteCore';
-import { getAudioDeviceScanner, createSqueezelitePlayerScanner } from '@/adapters/audio';
+import { getAudioDeviceScanner, createSqueezelitePlayerScanner, type SqueezelitePlayer } from '@/adapters/audio';
 
 type AdminApiOptions = {
   onReinitialize?: () => Promise<boolean>;
@@ -2981,19 +2981,18 @@ export class AdminApiHandler {
    */
   private async handleSqueezelitePlayers(res: ServerResponse): Promise<void> {
     try {
-      const scanner = createSqueezelitePlayerScanner();
-      const players = await scanner.scanPlayers();
+      const scanner = createSqueezelitePlayerScanner(this.squeezeliteCore);
+      const players = await scanner.getAvailablePlayers();
 
       this.log.debug('Squeezelite players scanned', { count: players.length });
 
       this.sendJson(res, 200, {
-        players: players.map(player => ({
+        players: players.map((player: SqueezelitePlayer) => ({
           id: player.id,
           name: player.name,
-          macAddress: player.macAddress,
-          ipAddress: player.ipAddress,
-          model: player.model,
-          firmware: player.firmware,
+          ip: player.ip,
+          port: player.port,
+          isLocal: player.isLocal,
         })),
       });
     } catch (err) {
