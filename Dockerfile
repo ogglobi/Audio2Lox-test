@@ -34,6 +34,8 @@ RUN apt-get update \
         cifs-utils \
         keyutils \
         nfs-common \
+        alsa-utils \
+        libasound2 \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=builder --chown=node:node /app/dist ./dist

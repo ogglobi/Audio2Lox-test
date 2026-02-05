@@ -332,11 +332,12 @@
         }
         list.innerHTML = data.devices.map(device => `
           <div class="device-card">
-            <div class="device-name">${device.name || device.id}</div>
-            <div>
+            <div class="device-name">${device.longName || device.name || device.id}</div>
+            <div style="color: #666; font-size: 11px; margin-top: 5px;">ID: ${device.id}</div>
+            <div style="margin-top: 8px;">
               ${(device.channels || []).map(ch => 
-                `<span class="channel-badge ${ch.type === 'playback' ? 'channel-playback' : 'channel-capture'}">
-                  ${ch.type}: ${ch.name}
+                `<span class="channel-badge ${ch.direction === 'playback' ? 'channel-playback' : 'channel-capture'}">
+                  ${ch.direction}: ${ch.name}
                 </span>`
               ).join('')}
             </div>
