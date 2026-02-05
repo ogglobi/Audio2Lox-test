@@ -27,10 +27,10 @@ services:
       - SYS_ADMIN
       - DAC_READ_SEARCH
     
-    # USB Devices für Audio und Relais (Linux only - auskommentiert für Windows)
-    # devices:
-    #   - /dev/snd:/dev/snd      # Audio/Soundkarte
-    #   - /dev/ttyUSB0:/dev/ttyUSB0  # USB Relais (ggf. anpassen: ttyUSB1, COM3 unter Windows)
+    # USB Devices für Audio und Relais (Linux - aktiv auf Unraid!)
+    devices:
+      - /dev/snd:/dev/snd              # Audio/Soundkarte
+      - /dev/ttyUSB_RELAY:/dev/ttyUSB0  # USB Relais (via udev-Rule)
     
     # USB Relais PowerManager Konfiguration
     environment:
