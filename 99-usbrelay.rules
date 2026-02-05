@@ -1,0 +1,8 @@
+# udev Rule für USBRelay2 (16c0:05df)
+# Makes HID device appear as /dev/ttyUSB_RELAY for easier identification
+
+# USBRelay2 (www.dcttech.com) - Vendor:Product 16c0:05df
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="16c0", ATTRS{idProduct}=="05df", SYMLINK+="ttyUSB_RELAY"
+
+# Alternative: Create a numbered symlink if you prefer
+# SUBSYSTEMS=="usb", ATTRS{idVendor}=="16c0", ATTRS{idProduct}=="05df", SYMLINK+="usbrelay%n"

@@ -1,4 +1,4 @@
-# ⚠️ IMPORTANT: HID Device Detection Issue
+# ⚠️ IMPORTANT: HID Device Detection Issue - SOLVED ✅
 
 ## Status Update
 
@@ -9,74 +9,59 @@ dmesg Output:
 hid-generic 0003:16C0:05DF.0007: hiddev98,hidraw3: USB HID v1.01 Device [www.dcttech.com USBRelay2]
 ```
 
-**Bedeutung:**
-- ✅ Gerät wird erkannt
-- ❌ Nicht als `/dev/ttyUSB*` sondern als `/dev/hiddev98` oder `/dev/hidraw3`
-- ❌ Unsere aktuelle PowerManager-Implementierung funktioniert NICHT mit HID-Geräten
+## Die Lösung: udev-Rule ⭐
 
-## Lösungsoptionen
+Wir erstellen eine **udev-Rule**, die das HID-Gerät zu einem seriellen Port macht!
 
-### Option A: HID-Gerät-Unterstützung implementieren (Komplex)
-
-Wir müssten die PowerManager-Implementierung umschreiben, um HID-Geräte zu unterstützen:
-
-```typescript
-// Statt SerialPort verwenden:
-import { openHidDevice } from 'some-hid-library';
-
-// Mit diesen Commands für USBRelay2:
-// Command Format: 0xFF 0x01 0x01 0x01 (Relais 1 einschalten)
-// Command Format: 0xFF 0x02 0x01 0x01 (Relais 1 ausschalten)
+```bash
+# Das ist alles was du brauchst:
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="16c0", ATTRS{idProduct}=="05df", SYMLINK+="ttyUSB_RELAY"
 ```
 
-**Aufwand:** Hoch - neue Dependency, neue Testings
-**Vorteil:** Dein vorhandenes Relais funktioniert
+**Was das macht:**
+- ✅ Relais wird weiterhin als `/dev/hidraw3` erkannt
+- ✅ Aber auch als `/dev/ttyUSB_RELAY` verfügbar (Symlink)
+- ✅ PowerManager funktioniert sofort ohne Code-Änderungen!
 
-### Option B: USB-zu-UART-Adapter verwenden (Einfach) ⭐ EMPFOHLEN
+## Installation auf Unraid
 
-Kaufe einen billigen USB-zu-UART/TTL-Adapter und baue dein Relais daran an:
-
-```
-USB-zu-UART-Adapter
-├─ USB-Stecker → Computer/Unraid
-├─ TX/RX Pins → Relais-Platine
-└─ GND → Relais-GND
-
-Wird als /dev/ttyUSB* erkannt ✓
+**Schritt 1: Datei kopieren**
+```bash
+scp 99-usbrelay.rules root@unraid-ip:/etc/udev/rules.d/
 ```
 
-**Aufwand:** Minimal - nur Hardware
-**Kosten:** ~5-15€
-**Vorteil:** Funktioniert sofort mit aktuellem PowerManager
+**Schritt 2: udev neu laden**
+```bash
+ssh root@unraid-ip
+udevadm control --reload-rules
+udevadm trigger
+```
 
-### Option C: Anderes Relais kaufen (Teuer)
+**Schritt 3: Relais aus/einstecken**
+(Um die neue Rule anzuwenden)
 
-Es gibt Relais die direkt als `/dev/ttyUSB*` erkannt werden.
+**Schritt 4: Überprüfen**
+```bash
+ls -la /dev/ttyUSB_RELAY
+```
 
-**Aufwand:** Kosten (~40€), Zeit
-**Vorteil:** Plug & Play
+## docker-compose.yml anpassen
 
-## Was will der User machen?
+```yaml
+devices:
+  - /dev/snd:/dev/snd               # Audio-Soundkarte
+  - /dev/ttyUSB_RELAY:/dev/ttyUSB0  # Relais
 
-Bitte entscheide dich für eine Option:
-
-### Falls Option B (USB-zu-UART): 
-Welches Relais-Modell verwendest du genau? Ich kann dir zeigen, wie du es anschließt.
-
-### Falls Option A (HID-Support):
-Lass mich die PowerManager-Implementierung für HID-Geräte erweitern. Das dauert ca. 2-3 Stunden für vollständiges Testing.
-
-### Falls Option C (Neues Relais):
-Welche Relais-Art möchtest du? (ARCELI mit TTL, oder anderes Modell?)
+environment:
+  PM_USB_PORT: "/dev/ttyUSB0"       # Im Container ist es jetzt /dev/ttyUSB0
+```
 
 ---
 
-**Aktuelle Situation:**
-- ❌ Audio-Devices sollten funktionieren (werden auch erkannt)
-- ❌ PowerManager wird NICHT funktionieren mit aktuellem Code
+**Soundkarte:** ✅ Braucht nichts Besonderes
+- Wird über ALSA erkannt (aplay/arecord)
+- `/dev/snd` mapping reicht aus
+- AudioDeviceScanner funktioniert perfekt damit
 
-**Nächste Schritte:**
-1. Entscheide dich für eine Option (A/B/C)
-2. Ich passe den Code oder die Hardware-Anleitung an
-3. Danach wird alles funktionieren
+**Details:** Siehe [UDEV_RULE_SETUP.md](UDEV_RULE_SETUP.md)
 
