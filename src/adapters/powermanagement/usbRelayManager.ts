@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { SerialPort } from 'serialport';
+import SerialPort from 'serialport';
 import { createLogger } from '@/shared/logging/logger';
 
 /**
