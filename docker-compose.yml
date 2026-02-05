@@ -29,18 +29,18 @@ services:
     
     # USB Devices für Audio und Relais (Linux - aktiv auf Unraid!)
     devices:
-      - /dev/snd:/dev/snd              # Audio/Soundkarte
-      - /dev/ttyUSB_RELAY:/dev/ttyUSB0  # USB Relais (via udev-Rule)
+      - /dev/snd:/dev/snd                        # Audio/Soundkarte
+      - /dev/hidraw3:/dev/hidraw0                # USB Relais HID-Gerät (16c0:05df)
+      # Alternativ falls hidraw3 nicht existiert: /dev/usb/hiddev98:/dev/hiddev0
     
-    # USB Relais PowerManager Konfiguration
+    # USB Relais PowerManager Konfiguration (HID-basiert)
     environment:
-      # PowerManager Einstellungen
       PM_ENABLED: "true"
-      PM_USB_PORT: "/dev/ttyUSB0"    # USB Port des Relais (Linux: /dev/ttyUSB*, Windows: COM3, etc.)
-      PM_USB_BAUD_RATE: "9600"       # Standard für ARCELI Relais
-      PM_CHANNEL: "1"                 # Relais Kanal: 1-4
-      PM_TURN_ON_AT_PLAY: "true"     # Relais einschalten bei Musik
-      PM_TURN_OFF_DELAY: "5"         # Sekunden bis Relais nach Stop ausschaltet
+      PM_USB_PORT: "/dev/hidraw0"                # HID-Gerätepfad (mapped von /dev/hidraw3)
+      PM_USB_BAUD_RATE: "9600"                  # Wird bei HID ignoriert
+      PM_CHANNEL: "1"                           # Relais Kanal: 1-4
+      PM_TURN_ON_AT_PLAY: "true"                # Relais einschalten bei Musik
+      PM_TURN_OFF_DELAY: "5"                    # Sekunden bis Relais nach Stop ausschaltet
     
     # Persistente Daten
     volumes:

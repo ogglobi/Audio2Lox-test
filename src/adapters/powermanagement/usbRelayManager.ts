@@ -1,34 +1,38 @@
 // @ts-nocheck
-import SerialPort from 'serialport';
+import { promises as fs } from 'fs';
 import { createLogger } from '@/shared/logging/logger';
 
 /**
- * USB Relais Manager für ARCELI SRD-05VDC-SL-C und ähnliche Modelle
- * 
- * Kommando-Format:
+ * USB Relais Manager für USBRelay2 (16c0:05df)
+ *
+ * Nutzt HID-Gerät direkt (/dev/hidraw*) statt SerialPort
+ * Funktioniert mit HID-Geräten die direkt vom Kernel erkannt werden
+ *
+ * Kommando-Format für USBRelay2:
  * - ON:  0xFF 0x01 0x01 (3 bytes)
  * - OFF: 0xFF 0x01 0x00 (3 bytes)
- * 
- * Für Multi-Channel Relais (z.B. 4-Kanal):
+ *
+ * Für Multi-Channel Relais:
  * - Channel 1 ON:  0xFF 0x01 0x01
  * - Channel 2 ON:  0xFF 0x02 0x01
  * - Channel 1 OFF: 0xFF 0x01 0x00
- * 
- * Referenz: https://www.amazon.de/ARCELI-SRD-05VDC-SL-C-Relais-Modul
+ *
+ * Referenz: USBRelay2 (www.dcttech.com)
  */
 
 export interface USBRelayConfig {
   enabled: boolean;
-  port: string;              // z.B. "/dev/ttyUSB0" (Linux) oder "COM3" (Windows)
-  baudRate: number;          // Typisch: 9600
-  channel: number;           // Kanal: 1-4 (für Multi-Channel Modelle)
+  port: string; // z.B. "/dev/hidraw0" (HID-Gerät) oder "/dev/ttyUSB0" (Serial)
+  baudRate: number; // Nur für Serial - ignoriert bei HID
+  channel: number; // Kanal: 1-4
   turnOnAtPlayStart: boolean;
-  turnOffAfterStopDelay: number;  // Sekunden
+  turnOffAfterStopDelay: number; // Sekunden
 }
 
 export class USBRelayManager {
   private readonly log = createLogger('PowerManagement', 'USBRelay');
-  private serialPort: SerialPort | null = null;
+  private hidDevicePath: string | null = null;
+  private isHidDevice = false; // True wenn es ein HID-Gerät ist
   private relayState: 'on' | 'off' = 'off';
   private stopTimeoutId: NodeJS.Timeout | null = null;
   private isInitialized = false;
@@ -39,7 +43,7 @@ export class USBRelayManager {
   }
 
   /**
-   * Initialisiert die serielle Verbindung zum USB-Relais
+   * Initialisiert die Verbindung zum USB-Relais (HID oder Serial)
    */
   public async initialize(): Promise<void> {
     if (!this.config.enabled) {
@@ -48,45 +52,26 @@ export class USBRelayManager {
     }
 
     try {
-      this.serialPort = new SerialPort({
-        path: this.config.port,
-        baudRate: this.config.baudRate,
-        autoOpen: false,
-      });
+      // Überprüfe ob es ein HID-Gerät ist
+      this.isHidDevice =
+        this.config.port.includes('hidraw') || this.config.port.includes('hiddev');
 
-      // Event Handler
-      this.serialPort.on('error', (error: Error) => {
-        this.log.error('Serial port error', { error: error.message });
-      });
-
-      this.serialPort.on('close', () => {
-        this.log.info('Serial port closed');
-        this.isInitialized = false;
-      });
-
-      // Port öffnen
-      await new Promise<void>((resolve, reject) => {
-        if (!this.serialPort) {
-          reject(new Error('SerialPort not initialized'));
-          return;
-        }
-        this.serialPort.open((error: Error | null) => {
-          if (error) {
-            reject(error);
-          } else {
-            this.log.info('USB Relais connected', {
-              port: this.config.port,
-              baudRate: this.config.baudRate,
-              channel: this.config.channel,
-            });
-            this.isInitialized = true;
-            resolve();
-          }
-        });
-      });
+      if (this.isHidDevice) {
+        await this.initializeHID();
+      } else {
+        // Fallback für SerialPort (legacy)
+        await this.initializeSerial();
+      }
 
       // Initial: Relais ausschalten
       await this.turnRelayOff();
+
+      this.log.info('USB Relais initialized successfully', {
+        port: this.config.port,
+        type: this.isHidDevice ? 'HID' : 'Serial',
+        channel: this.config.channel,
+      });
+      this.isInitialized = true;
     } catch (error) {
       this.log.error('Failed to initialize USB Relais', {
         port: this.config.port,
@@ -97,10 +82,42 @@ export class USBRelayManager {
   }
 
   /**
+   * Initialisiert HID-Gerät (z.B. /dev/hidraw0)
+   */
+  private async initializeHID(): Promise<void> {
+    try {
+      // Test ob die Datei existiert
+      await fs.access(this.config.port);
+      this.hidDevicePath = this.config.port;
+
+      this.log.info('HID device verified', {
+        port: this.config.port,
+      });
+    } catch (error) {
+      throw new Error(
+        `Failed to open HID device ${this.config.port}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+
+  /**
+   * Initialisiert serielles Gerät (z.B. /dev/ttyUSB0) - Legacy
+   */
+  private async initializeSerial(): Promise<void> {
+    // Placeholder für Serial-Support
+    // Nur HID wird für jetzt aktiv unterstützt
+    throw new Error(
+      'Serial port support requires serialport module. Please use HID device (/dev/hidraw*) instead.'
+    );
+  }
+
+  /**
    * Behandelt Playback-State-Änderungen
    */
   public async handlePlaybackStateChange(
-    state: 'playing' | 'paused' | 'stopped',
+    state: 'playing' | 'paused' | 'stopped'
   ): Promise<void> {
     if (!this.isInitialized) return;
 
@@ -124,7 +141,7 @@ export class USBRelayManager {
    */
   private async turnRelayOn(): Promise<void> {
     if (this.relayState === 'on') {
-      return;  // Schon an
+      return; // Schon an
     }
 
     try {
@@ -134,7 +151,7 @@ export class USBRelayManager {
         this.stopTimeoutId = null;
       }
 
-      // Relais-Kommando senden: 0xFF 0x01 0x01 (ON)
+      // Relais-Kommando senden: 0xFF [channel] 0x01 (ON)
       const command = this.buildCommand(this.config.channel, true);
       await this.sendCommand(command);
 
@@ -168,11 +185,11 @@ export class USBRelayManager {
    */
   private async turnRelayOff(): Promise<void> {
     if (this.relayState === 'off') {
-      return;  // Schon aus
+      return; // Schon aus
     }
 
     try {
-      // Relais-Kommando senden: 0xFF 0x01 0x00 (OFF)
+      // Relais-Kommando senden: 0xFF [channel] 0x00 (OFF)
       const command = this.buildCommand(this.config.channel, false);
       await this.sendCommand(command);
 
@@ -186,8 +203,8 @@ export class USBRelayManager {
   }
 
   /**
-   * Baut Relais-Kommando für ARCELI USB Relais
-   * 
+   * Baut Relais-Kommando für USBRelay2
+   *
    * Format:
    * Byte 0: 0xFF (Präfix)
    * Byte 1: Channel (0x01-0x04)
@@ -195,32 +212,35 @@ export class USBRelayManager {
    */
   private buildCommand(channel: number, state: boolean): Buffer {
     const command = Buffer.alloc(3);
-    command[0] = 0xff;              // Präfix
-    command[1] = Math.min(channel, 4);  // Channel 1-4
-    command[2] = state ? 0x01 : 0x00;   // State
+    command[0] = 0xff; // Präfix
+    command[1] = Math.min(Math.max(channel, 1), 4); // Channel 1-4
+    command[2] = state ? 0x01 : 0x00; // State
     return command;
   }
 
   /**
-   * Sendet Kommando über serielle Schnittstelle
+   * Sendet Kommando über HID-Schnittstelle
    */
   private async sendCommand(command: Buffer): Promise<void> {
-    if (!this.serialPort || !this.isInitialized) {
-      throw new Error('Serial port not initialized');
+    if (!this.isInitialized || !this.isHidDevice || !this.hidDevicePath) {
+      throw new Error('HID device not initialized');
     }
 
-    return new Promise((resolve, reject) => {
-      this.serialPort!.write(command, (error: Error | null) => {
-        if (error) {
-          reject(error);
-        } else {
-          this.log.debug('Command sent', {
-            command: command.toString('hex'),
-          });
-          resolve();
-        }
+    try {
+      const fileHandle = await fs.open(this.hidDevicePath, 'r+');
+      await fileHandle.write(command);
+      await fileHandle.close();
+
+      this.log.debug('Command sent via HID', {
+        command: command.toString('hex'),
       });
-    });
+    } catch (error) {
+      throw new Error(
+        `Failed to send HID command: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
   }
 
   /**
@@ -237,10 +257,10 @@ export class USBRelayManager {
       this.log.info('Relay test cycle', { current: i + 1, total: cycleCount });
 
       await this.turnRelayOn();
-      await this.delay(500);  // 500ms an
+      await this.delay(500); // 500ms an
 
       await this.turnRelayOff();
-      await this.delay(500);  // 500ms aus
+      await this.delay(500); // 500ms aus
     }
 
     this.log.info('Relay test completed');
@@ -265,14 +285,7 @@ export class USBRelayManager {
       });
     }
 
-    if (this.serialPort && this.serialPort.isOpen) {
-      return new Promise((resolve) => {
-        this.serialPort!.close(() => {
-          this.isInitialized = false;
-          resolve();
-        });
-      });
-    }
+    this.isInitialized = false;
   }
 
   /**
@@ -286,16 +299,18 @@ export class USBRelayManager {
    * Status abrufen
    */
   public getStatus(): {
+    enabled: boolean;
     initialized: boolean;
-    relayState: 'on' | 'off';
     port: string;
     channel: number;
+    relayState: 'on' | 'off';
   } {
     return {
+      enabled: this.config.enabled,
       initialized: this.isInitialized,
-      relayState: this.relayState,
       port: this.config.port,
       channel: this.config.channel,
+      relayState: this.relayState,
     };
   }
 }
