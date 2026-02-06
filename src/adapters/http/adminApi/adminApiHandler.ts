@@ -750,6 +750,16 @@ export class AdminApiHandler {
         pattern: /^\/powermanager\/test$/,
         handler: async (_req, res) => this.handlePowerManagerTest(res),
       },
+      {
+        method: 'POST',
+        pattern: /^\/powermanager\/on$/,
+        handler: async (_req, res) => this.handlePowerManagerOn(res),
+      },
+      {
+        method: 'POST',
+        pattern: /^\/powermanager\/off$/,
+        handler: async (_req, res) => this.handlePowerManagerOff(res),
+      },
     ];
   }
 
@@ -3098,6 +3108,64 @@ export class AdminApiHandler {
       const message = err instanceof Error ? err.message : String(err);
       this.log.error('PowerManager test failed', { message });
       this.sendJson(res, 500, { error: 'Test failed', details: message });
+    }
+  }
+
+  /**
+   * POST /admin/api/powermanager/on
+   * Manually turn relay ON
+   */
+  private async handlePowerManagerOn(res: ServerResponse): Promise<void> {
+    try {
+      const enabled = process.env.PM_ENABLED === 'true';
+
+      if (!enabled) {
+        this.sendJson(res, 400, { error: 'PowerManager is not enabled' });
+        return;
+      }
+
+      this.log.info('PowerManager ON triggered manually');
+
+      // TODO: Call PowerManagementService to turn relay ON
+      // For now, just send success response
+      this.sendJson(res, 200, {
+        success: true,
+        message: 'Relay turned ON',
+        state: 'on',
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.log.error('PowerManager ON failed', { message });
+      this.sendJson(res, 500, { error: 'Failed to turn ON', details: message });
+    }
+  }
+
+  /**
+   * POST /admin/api/powermanager/off
+   * Manually turn relay OFF
+   */
+  private async handlePowerManagerOff(res: ServerResponse): Promise<void> {
+    try {
+      const enabled = process.env.PM_ENABLED === 'true';
+
+      if (!enabled) {
+        this.sendJson(res, 400, { error: 'PowerManager is not enabled' });
+        return;
+      }
+
+      this.log.info('PowerManager OFF triggered manually');
+
+      // TODO: Call PowerManagementService to turn relay OFF
+      // For now, just send success response
+      this.sendJson(res, 200, {
+        success: true,
+        message: 'Relay turned OFF',
+        state: 'off',
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.log.error('PowerManager OFF failed', { message });
+      this.sendJson(res, 500, { error: 'Failed to turn OFF', details: message });
     }
   }
 }

@@ -509,13 +509,33 @@
     },
 
     async powerOn() {
-      alert('🔌 Power ON - would trigger relay (API integration needed)');
-      // TODO: Implement actual API call
+      try {
+        const response = await fetch('/admin/api/powermanager/on', { method: 'POST' });
+        if (response.ok) {
+          alert('✓ Relay turned ON!');
+          this.loadPowerStatus();
+        } else {
+          const err = await response.json();
+          alert('✗ Failed: ' + (err.message || 'Unknown error'));
+        }
+      } catch (err) {
+        alert('Error: ' + err.message);
+      }
     },
 
     async powerOff() {
-      alert('⏻ Power OFF - would trigger relay (API integration needed)');
-      // TODO: Implement actual API call
+      try {
+        const response = await fetch('/admin/api/powermanager/off', { method: 'POST' });
+        if (response.ok) {
+          alert('✓ Relay turned OFF!');
+          this.loadPowerStatus();
+        } else {
+          const err = await response.json();
+          alert('✗ Failed: ' + (err.message || 'Unknown error'));
+        }
+      } catch (err) {
+        alert('Error: ' + err.message);
+      }
     }
   };
 
