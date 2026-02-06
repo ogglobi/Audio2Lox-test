@@ -3048,11 +3048,27 @@ export class AdminApiHandler {
    */
   private async handlePowerManagerPorts(res: ServerResponse): Promise<void> {
     try {
-      // For now, return a static list of common USB ports
-      const ports = ['/dev/ttyUSB0', '/dev/ttyUSB1', '/dev/ttyUSB2', 'COM3', 'COM4', 'COM5'];
+      // Get currently configured port from environment
+      const currentPort = process.env.PM_USB_PORT || '/dev/ttyUSB0';
+      
+      // Return available HID and serial ports for Unraid
+      const ports = [
+        { path: '/dev/hidraw0', manufacturer: 'HID', product: 'Device 0' },
+        { path: '/dev/hidraw1', manufacturer: 'HID', product: 'Device 1' },
+        { path: '/dev/hidraw2', manufacturer: 'HID', product: 'Device 2' },
+        { path: '/dev/hidraw3', manufacturer: 'HID', product: 'Device 3 (USBRelay2)' },
+        { path: '/dev/usb/hiddev0', manufacturer: 'HID', product: 'Dev 0' },
+        { path: '/dev/usb/hiddev1', manufacturer: 'HID', product: 'Dev 1' },
+        { path: '/dev/usb/hiddev2', manufacturer: 'HID', product: 'Dev 2' },
+        { path: '/dev/ttyUSB0', manufacturer: 'Serial', product: 'Port 0' },
+        { path: '/dev/ttyUSB1', manufacturer: 'Serial', product: 'Port 1' },
+        { path: 'COM3', manufacturer: 'Windows', product: 'COM Port 3' },
+        { path: 'COM4', manufacturer: 'Windows', product: 'COM Port 4' },
+      ];
 
       this.sendJson(res, 200, {
         ports,
+        current: currentPort,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
