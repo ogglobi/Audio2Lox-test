@@ -62,6 +62,9 @@ import { LoxoneConfigService } from '@/adapters/loxone/services/loxoneConfigServ
 import { stopWithTimeout } from '@/runtime/stopWithTimeout';
 import { USBRelayManager } from '@/adapters/powermanagement/usbRelayManager';
 import { PowerManagementService } from '@/adapters/powermanagement/powerManagementService';
+import { getAudioDeviceScanner } from '@/adapters/audio/audioDeviceScanner';
+import { generateAsoundConf } from '@/adapters/audio/asoundGenerator';
+import { SnapclientManager } from '@/adapters/audio/snapclientManager';
 
 /**
  * Descriptor for services that need graceful shutdown coordination.
@@ -340,6 +343,18 @@ export function createRuntime(): Runtime {
       }
     }
 
+    // Auto-generate /etc/asound.conf and start SnapclientManager
+    const audioScanner = getAudioDeviceScanner();
+    const snapclientManager = new SnapclientManager();
+    try {
+      await generateAsoundConf(audioScanner);
+      await snapclientManager.init();
+      log.info('Audio subsystem initialized (asound.conf + snapclients)');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.error('Audio subsystem init failed (non-critical)', { message });
+    }
+
     httpService = new HttpService(config.http, {
       onReinitialize: handleReinitialize,
       notifier: ports.notifier,
@@ -364,6 +379,7 @@ export function createRuntime(): Runtime {
       contentManager,
       audioManager,
       usbRelayManager: usbRelayManagerInstance,
+      snapclientManager,
     });
     networkService = new NetworkService({
       lineInRegistry,
@@ -446,6 +462,7 @@ export function createRuntime(): Runtime {
     if (httpService) {
       services.push({ name: 'http', stop: () => httpService!.stop() });
     }
+    services.push({ name: 'snapclients', stop: () => snapclientManager.shutdown() });
 
     await Promise.all(
       services.map((service) =>

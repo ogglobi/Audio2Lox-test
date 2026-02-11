@@ -229,6 +229,7 @@
             <div class="audio-tabs">
               <button class="audio-tab active" onclick="window.audioConfigPlugin.switchTab('devices')">🎵 Audio Devices</button>
               <button class="audio-tab" onclick="window.audioConfigPlugin.switchTab('zones')">📍 Zone Mapping</button>
+              <button class="audio-tab" onclick="window.audioConfigPlugin.switchTab('snapclients')">🔊 Snapclients</button>
               <button class="audio-tab" onclick="window.audioConfigPlugin.switchTab('power')">⚡ Power Management</button>
             </div>
             
@@ -239,6 +240,10 @@
 
             <div id="zonesTab" class="audio-tab-content">
               <div id="zonesList"></div>
+            </div>
+
+            <div id="snapclientsTab" class="audio-tab-content">
+              <div id="snapclientsList"></div>
             </div>
 
             <div id="powerTab" class="audio-tab-content">
@@ -314,6 +319,8 @@
         this.loadDevices();
       } else if (tabName === 'zones') {
         this.loadZones();
+      } else if (tabName === 'snapclients') {
+        this.loadSnapclients();
       } else if (tabName === 'power') {
         this.loadPowerStatus();
       }
@@ -609,6 +616,165 @@
       } catch (err) {
         console.error('Remove zone output error:', err);
         if (statusEl) statusEl.innerHTML = `<span style="color:#f44336;">✗ ${err.message}</span>`;
+      }
+    },
+
+    // -------------------------------------------------------------------------
+    // Snapclient management
+    // -------------------------------------------------------------------------
+
+    async loadSnapclients() {
+      const list = document.getElementById('snapclientsList');
+      list.innerHTML = '<div class="loading">Loading snapclients...</div>';
+      try {
+        // Fetch snapclients and virtual ALSA outputs in parallel
+        const [scRes, outRes] = await Promise.all([
+          fetch('/admin/api/audio/snapclients'),
+          fetch('/admin/api/audio/outputs'),
+        ]);
+        if (!scRes.ok) throw new Error('Failed to load snapclients');
+        const scData = await scRes.json();
+        const outData = outRes.ok ? await outRes.json() : { virtualDevices: [] };
+        const snapclients = scData.snapclients || [];
+        const virtualDevices = outData.virtualDevices || [];
+
+        // Build ALSA device option list
+        const alsaOptions = virtualDevices.map(v =>
+          `<option value="${this._escAttr(v.id)}">${v.id} — ${v.label || v.mode}</option>`
+        ).join('');
+
+        // "Add new" form
+        const addForm = `
+          <div class="device-card" style="border-left: 3px solid #667eea;">
+            <div class="device-name">➕ Add Snapclient</div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px;">
+              <div>
+                <label style="font-size:12px; font-weight:600; color:#555;">ID / HostID</label>
+                <input type="text" id="sc-new-id" placeholder="e.g. zone_kitchen"
+                  style="width:100%; padding:6px 8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box;" />
+              </div>
+              <div>
+                <label style="font-size:12px; font-weight:600; color:#555;">Name</label>
+                <input type="text" id="sc-new-name" placeholder="e.g. Küche"
+                  style="width:100%; padding:6px 8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box;" />
+              </div>
+            </div>
+            <div style="margin-top:8px;">
+              <label style="font-size:12px; font-weight:600; color:#555;">ALSA Device</label>
+              <select id="sc-new-alsa" style="width:100%; padding:6px 8px; border:1px solid #ddd; border-radius:4px; background:white;">
+                <option value="">-- Select ALSA device --</option>
+                ${alsaOptions}
+              </select>
+            </div>
+            <div style="margin-top:8px;">
+              <label style="font-size:12px; font-weight:600; color:#555;">
+                <input type="checkbox" id="sc-new-enabled" checked /> Auto-start on boot
+              </label>
+            </div>
+            <button onclick="window.audioConfigPlugin.addSnapclient()"
+                    style="margin-top:10px; padding:8px 15px; background:#667eea; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:600; width:100%;">
+              ➕ Create Snapclient
+            </button>
+            <div id="sc-new-status" style="margin-top:6px; font-size:12px;"></div>
+          </div>
+        `;
+
+        // Existing clients
+        const clientCards = snapclients.map(sc => `
+          <div class="device-card" style="border-left: 3px solid ${sc.running ? '#4caf50' : '#999'};">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div class="device-name">${this._escAttr(sc.name || sc.id)}</div>
+              <span style="font-size:12px; padding:3px 8px; border-radius:12px; font-weight:600;
+                background:${sc.running ? '#e8f5e9' : '#f5f5f5'};
+                color:${sc.running ? '#2e7d32' : '#999'};">
+                ${sc.running ? '● Running' : '○ Stopped'}${sc.pid ? ' (PID ' + sc.pid + ')' : ''}
+              </span>
+            </div>
+            <div style="margin-top:8px; font-size:12px; color:#666;">
+              <span style="font-family:monospace;">ID: ${this._escAttr(sc.id)}</span> &nbsp;|&nbsp;
+              <span style="font-family:monospace;">ALSA: ${this._escAttr(sc.alsaDevice)}</span> &nbsp;|&nbsp;
+              Auto-start: ${sc.enabled ? '✓ Yes' : '✗ No'}
+            </div>
+            <div style="display:flex; gap:8px; margin-top:10px;">
+              ${sc.running
+                ? `<button onclick="window.audioConfigPlugin.stopSnapclient('${this._escAttr(sc.id)}')"
+                    style="flex:1; padding:8px; background:#f44336; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:600;">⏹ Stop</button>`
+                : `<button onclick="window.audioConfigPlugin.startSnapclient('${this._escAttr(sc.id)}')"
+                    style="flex:1; padding:8px; background:#4caf50; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:600;">▶ Start</button>`
+              }
+              <button onclick="window.audioConfigPlugin.deleteSnapclient('${this._escAttr(sc.id)}')"
+                      style="padding:8px 12px; background:#999; color:white; border:none; border-radius:4px; cursor:pointer;">🗑️</button>
+            </div>
+          </div>
+        `).join('');
+
+        list.innerHTML = addForm + (snapclients.length > 0
+          ? clientCards
+          : '<div style="color:#999; text-align:center; padding:20px;">No snapclients configured yet. Create one above.</div>');
+
+      } catch (err) {
+        console.error('Snapclient load error:', err);
+        list.innerHTML = `<div class="error">Error loading snapclients: ${err.message}</div>`;
+      }
+    },
+
+    async addSnapclient() {
+      const id = document.getElementById('sc-new-id')?.value?.trim();
+      const name = document.getElementById('sc-new-name')?.value?.trim();
+      const alsaDevice = document.getElementById('sc-new-alsa')?.value;
+      const enabled = document.getElementById('sc-new-enabled')?.checked ?? true;
+      const statusEl = document.getElementById('sc-new-status');
+
+      if (!id || !alsaDevice) {
+        if (statusEl) statusEl.innerHTML = '<span style="color:#f44336;">ID and ALSA device are required.</span>';
+        return;
+      }
+
+      if (statusEl) statusEl.innerHTML = '<span style="color:#667eea;">Creating...</span>';
+      try {
+        const res = await fetch('/admin/api/audio/snapclients', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, name: name || id, alsaDevice, enabled }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || 'Create failed');
+        }
+        this.loadSnapclients();
+      } catch (err) {
+        if (statusEl) statusEl.innerHTML = `<span style="color:#f44336;">✗ ${err.message}</span>`;
+      }
+    },
+
+    async startSnapclient(id) {
+      try {
+        const res = await fetch(`/admin/api/audio/snapclients/${encodeURIComponent(id)}/start`, { method: 'POST' });
+        if (!res.ok) throw new Error('Start failed');
+        setTimeout(() => this.loadSnapclients(), 500);
+      } catch (err) {
+        alert('Start failed: ' + err.message);
+      }
+    },
+
+    async stopSnapclient(id) {
+      try {
+        const res = await fetch(`/admin/api/audio/snapclients/${encodeURIComponent(id)}/stop`, { method: 'POST' });
+        if (!res.ok) throw new Error('Stop failed');
+        setTimeout(() => this.loadSnapclients(), 500);
+      } catch (err) {
+        alert('Stop failed: ' + err.message);
+      }
+    },
+
+    async deleteSnapclient(id) {
+      if (!confirm(`Delete snapclient "${id}"?`)) return;
+      try {
+        const res = await fetch(`/admin/api/audio/snapclients/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error('Delete failed');
+        this.loadSnapclients();
+      } catch (err) {
+        alert('Delete failed: ' + err.message);
       }
     },
 

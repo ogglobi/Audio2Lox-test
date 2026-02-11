@@ -45,6 +45,7 @@ import type { AudioManager } from '@/application/playback/audioManager';
 import { audioResampler } from '@/ports/types/audioFormat';
 import https from 'node:https';
 import type { USBRelayManager } from '@/adapters/powermanagement/usbRelayManager';
+import type { SnapclientManager } from '@/adapters/audio/snapclientManager';
 import { loadConfig as loadRuntimeConfig } from '@/config';
 import type { SnapcastCore } from '@/adapters/outputs/snapcast/snapcastCore';
 import type { ZoneManagerFacade } from '@/application/zones/createZoneManager';
@@ -71,6 +72,7 @@ type AdminApiOptions = {
   contentManager: ContentManager;
   audioManager: AudioManager;
   usbRelayManager?: USBRelayManager | null;
+  snapclientManager?: SnapclientManager | null;
 };
 
 type RouteHandler = (
@@ -125,6 +127,7 @@ export class AdminApiHandler {
   private readonly contentManager: ContentManager;
   private readonly audioManager: AudioManager;
   private readonly usbRelayManager: USBRelayManager | null;
+  private readonly snapclientManager: SnapclientManager | null;
   private adminUiUpdateInFlight: Promise<AdminUiUpdateResult> | null = null;
   private clockOffsetCache: { offsetMs: number | null; sampledAt: number } = { offsetMs: null, sampledAt: 0 };
   private readonly routes: Route[];
@@ -148,6 +151,7 @@ export class AdminApiHandler {
     this.contentManager = options.contentManager;
     this.audioManager = options.audioManager;
     this.usbRelayManager = options.usbRelayManager ?? null;
+    this.snapclientManager = options.snapclientManager ?? null;
     this.routes = this.buildRoutes();
   }
 
@@ -642,6 +646,32 @@ export class AdminApiHandler {
         method: 'GET',
         pattern: /^\/audio\/squeezelite\/players$/,
         handler: async (_req, res) => this.handleSqueezelitePlayers(res),
+      },
+      // Snapclient Management API Endpoints
+      {
+        method: 'GET',
+        pattern: /^\/audio\/snapclients$/,
+        handler: async (_req, res) => this.handleSnapclientsGet(res),
+      },
+      {
+        method: 'POST',
+        pattern: /^\/audio\/snapclients$/,
+        handler: async (req, res) => this.handleSnapclientUpsert(req, res),
+      },
+      {
+        method: 'DELETE',
+        pattern: /^\/audio\/snapclients\/([^/]+)$/,
+        handler: async (_req, res, match) => this.handleSnapclientDelete(res, match[1]!),
+      },
+      {
+        method: 'POST',
+        pattern: /^\/audio\/snapclients\/([^/]+)\/start$/,
+        handler: async (_req, res, match) => this.handleSnapclientStart(res, match[1]!),
+      },
+      {
+        method: 'POST',
+        pattern: /^\/audio\/snapclients\/([^/]+)\/stop$/,
+        handler: async (_req, res, match) => this.handleSnapclientStop(res, match[1]!),
       },
       {
         method: 'GET',
@@ -2937,6 +2967,82 @@ export class AdminApiHandler {
       this.log.error('Failed to get audio outputs', { message });
       this.sendJson(res, 500, { error: 'Failed to discover audio outputs', details: message });
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Snapclient management handlers
+  // ---------------------------------------------------------------------------
+
+  /** GET /admin/api/audio/snapclients */
+  private handleSnapclientsGet(res: ServerResponse): void {
+    if (!this.snapclientManager) {
+      this.sendJson(res, 501, { error: 'SnapclientManager not available' });
+      return;
+    }
+    this.sendJson(res, 200, { snapclients: this.snapclientManager.getAll() });
+  }
+
+  /** POST /admin/api/audio/snapclients  — create or update */
+  private async handleSnapclientUpsert(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (!this.snapclientManager) {
+      this.sendJson(res, 501, { error: 'SnapclientManager not available' });
+      return;
+    }
+    try {
+      const body = (await this.readJsonBody(req, res)) as {
+        id?: string;
+        name?: string;
+        alsaDevice?: string;
+        enabled?: boolean;
+      } | null;
+      if (!body) return; // readJsonBody already sent error
+      if (!body.id || !body.alsaDevice) {
+        this.sendJson(res, 400, { error: 'Missing required fields: id, alsaDevice' });
+        return;
+      }
+      const config = {
+        id: String(body.id),
+        name: String(body.name ?? body.id),
+        alsaDevice: String(body.alsaDevice),
+        enabled: body.enabled !== false,
+      };
+      const status = await this.snapclientManager.upsert(config);
+      this.sendJson(res, 200, status);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.log.error('Failed to upsert snapclient', { message });
+      this.sendJson(res, 500, { error: 'Failed to upsert snapclient', details: message });
+    }
+  }
+
+  /** DELETE /admin/api/audio/snapclients/:id */
+  private async handleSnapclientDelete(res: ServerResponse, id: string): Promise<void> {
+    if (!this.snapclientManager) {
+      this.sendJson(res, 501, { error: 'SnapclientManager not available' });
+      return;
+    }
+    const deleted = await this.snapclientManager.remove(decodeURIComponent(id));
+    this.sendJson(res, deleted ? 200 : 404, { ok: deleted });
+  }
+
+  /** POST /admin/api/audio/snapclients/:id/start */
+  private handleSnapclientStart(res: ServerResponse, id: string): void {
+    if (!this.snapclientManager) {
+      this.sendJson(res, 501, { error: 'SnapclientManager not available' });
+      return;
+    }
+    const ok = this.snapclientManager.start(decodeURIComponent(id));
+    this.sendJson(res, ok ? 200 : 404, { ok });
+  }
+
+  /** POST /admin/api/audio/snapclients/:id/stop */
+  private handleSnapclientStop(res: ServerResponse, id: string): void {
+    if (!this.snapclientManager) {
+      this.sendJson(res, 501, { error: 'SnapclientManager not available' });
+      return;
+    }
+    const ok = this.snapclientManager.stop(decodeURIComponent(id));
+    this.sendJson(res, ok ? 200 : 404, { ok });
   }
 
   /**

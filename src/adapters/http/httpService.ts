@@ -34,6 +34,7 @@ import type { AudioManager } from '@/application/playback/audioManager';
 import type { SqueezeliteCore } from '@/adapters/outputs/squeezelite/squeezeliteCore';
 import type { LmsCliServer } from '@/adapters/outputs/squeezelite/lmsCliServer';
 import type { USBRelayManager } from '@/adapters/powermanagement/usbRelayManager';
+import type { SnapclientManager } from '@/adapters/audio/snapclientManager';
 
 /**
  * Hosts the public HTTP gateway (admin UI, API stub, music streaming, Sendspin).
@@ -78,6 +79,7 @@ export class HttpService {
       audioManager: AudioManager;
       squeezeliteCli: LmsCliServer;
       usbRelayManager?: USBRelayManager | null;
+      snapclientManager?: SnapclientManager | null;
     },
   ) {
     this.adminApi = new AdminApiHandler({
@@ -99,6 +101,7 @@ export class HttpService {
       contentManager: options.contentManager,
       audioManager: options.audioManager,
       usbRelayManager: options.usbRelayManager,
+      snapclientManager: options.snapclientManager,
     });
     this.music = new MusicStreamingHandler(config.musicDir);
     this.staticFiles = new StaticFileHandler(config.publicDir);
