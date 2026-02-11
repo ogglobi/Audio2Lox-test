@@ -313,9 +313,10 @@ export function createRuntime(): Runtime {
     // Initialize PowerManager (USB Relais für Verstärker-Steuerung)
     const pmEnabled = process.env.PM_ENABLED === 'true';
     let powerManagementService: PowerManagementService | null = null;
+    let usbRelayManagerInstance: USBRelayManager | null = null;
     if (pmEnabled) {
       try {
-        const usbRelayManager = new USBRelayManager({
+        usbRelayManagerInstance = new USBRelayManager({
           enabled: true,
           port: process.env.PM_USB_PORT || '/dev/ttyUSB0',
           baudRate: parseInt(process.env.PM_USB_BAUD_RATE || '9600', 10),
@@ -323,10 +324,10 @@ export function createRuntime(): Runtime {
           turnOnAtPlayStart: process.env.PM_TURN_ON_AT_PLAY !== 'false',
           turnOffAfterStopDelay: parseInt(process.env.PM_TURN_OFF_DELAY || '5', 10),
         });
-        await usbRelayManager.initialize();
+        await usbRelayManagerInstance.initialize();
         // Get playback coordinator from zoneManager instance
         powerManagementService = new PowerManagementService(
-          usbRelayManager,
+          usbRelayManagerInstance,
           (zoneManagerInstance as any).playbackCoordinator,
         );
         powerManagementService.start();
@@ -334,6 +335,7 @@ export function createRuntime(): Runtime {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         log.error('Failed to initialize PowerManagement service', { message });
+        usbRelayManagerInstance = null;
         // Nicht kritisch - Server startet weiter
       }
     }
@@ -361,6 +363,7 @@ export function createRuntime(): Runtime {
       groupManager,
       contentManager,
       audioManager,
+      usbRelayManager: usbRelayManagerInstance,
     });
     networkService = new NetworkService({
       lineInRegistry,

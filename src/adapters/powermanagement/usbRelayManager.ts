@@ -142,7 +142,7 @@ export class USBRelayManager {
   /**
    * Schaltet Relais EIN
    */
-  private async turnRelayOn(): Promise<void> {
+  public async turnRelayOn(): Promise<void> {
     if (this.relayState === 'on') {
       return; // Schon an
     }
@@ -186,7 +186,7 @@ export class USBRelayManager {
   /**
    * Schaltet Relais AUS
    */
-  private async turnRelayOff(): Promise<void> {
+  public async turnRelayOff(): Promise<void> {
     if (this.relayState === 'off') {
       return; // Schon aus
     }

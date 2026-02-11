@@ -44,6 +44,7 @@ import type { GroupManagerReadPort } from '@/application/groups/groupManager';
 import type { AudioManager } from '@/application/playback/audioManager';
 import { audioResampler } from '@/ports/types/audioFormat';
 import https from 'node:https';
+import type { USBRelayManager } from '@/adapters/powermanagement/usbRelayManager';
 import { loadConfig as loadRuntimeConfig } from '@/config';
 import type { SnapcastCore } from '@/adapters/outputs/snapcast/snapcastCore';
 import type { ZoneManagerFacade } from '@/application/zones/createZoneManager';
@@ -69,6 +70,7 @@ type AdminApiOptions = {
   groupManager: GroupManagerReadPort;
   contentManager: ContentManager;
   audioManager: AudioManager;
+  usbRelayManager?: USBRelayManager | null;
 };
 
 type RouteHandler = (
@@ -122,6 +124,7 @@ export class AdminApiHandler {
   private readonly groupManager: GroupManagerReadPort;
   private readonly contentManager: ContentManager;
   private readonly audioManager: AudioManager;
+  private readonly usbRelayManager: USBRelayManager | null;
   private adminUiUpdateInFlight: Promise<AdminUiUpdateResult> | null = null;
   private clockOffsetCache: { offsetMs: number | null; sampledAt: number } = { offsetMs: null, sampledAt: 0 };
   private readonly routes: Route[];
@@ -144,6 +147,7 @@ export class AdminApiHandler {
     this.groupManager = options.groupManager;
     this.contentManager = options.contentManager;
     this.audioManager = options.audioManager;
+    this.usbRelayManager = options.usbRelayManager ?? null;
     this.routes = this.buildRoutes();
   }
 
@@ -3028,12 +3032,15 @@ export class AdminApiHandler {
         return;
       }
 
+      const relayStatus = this.usbRelayManager?.getStatus();
       this.sendJson(res, 200, {
         enabled: true,
         message: 'PowerManager is enabled',
-        port: process.env.PM_USB_PORT || '/dev/ttyUSB0',
+        port: relayStatus?.port || process.env.PM_USB_PORT || '/dev/ttyUSB0',
         baudRate: parseInt(process.env.PM_USB_BAUD_RATE || '9600', 10),
-        channel: parseInt(process.env.PM_CHANNEL || '1', 10),
+        channel: relayStatus?.channel || parseInt(process.env.PM_CHANNEL || '1', 10),
+        initialized: relayStatus?.initialized ?? false,
+        relayState: relayStatus?.relayState ?? 'unknown',
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -3118,8 +3125,13 @@ export class AdminApiHandler {
 
       this.log.info('PowerManager test triggered');
 
-      // TODO: Implement actual relay test pulse logic
-      this.sendJson(res, 200, { success: true, message: 'Test pulse sent' });
+      if (!this.usbRelayManager) {
+        this.sendJson(res, 500, { error: 'USBRelayManager not available' });
+        return;
+      }
+
+      await this.usbRelayManager.testRelay(3);
+      this.sendJson(res, 200, { success: true, message: 'Test pulse sent (3 cycles)' });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.log.error('PowerManager test failed', { message });
@@ -3142,12 +3154,17 @@ export class AdminApiHandler {
 
       this.log.info('PowerManager ON triggered manually');
 
-      // TODO: Call PowerManagementService to turn relay ON
-      // For now, just send success response
+      if (!this.usbRelayManager) {
+        this.sendJson(res, 500, { error: 'USBRelayManager not available' });
+        return;
+      }
+
+      await this.usbRelayManager.turnRelayOn();
+      const status = this.usbRelayManager.getStatus();
       this.sendJson(res, 200, {
         success: true,
         message: 'Relay turned ON',
-        state: 'on',
+        state: status.relayState,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -3171,12 +3188,17 @@ export class AdminApiHandler {
 
       this.log.info('PowerManager OFF triggered manually');
 
-      // TODO: Call PowerManagementService to turn relay OFF
-      // For now, just send success response
+      if (!this.usbRelayManager) {
+        this.sendJson(res, 500, { error: 'USBRelayManager not available' });
+        return;
+      }
+
+      await this.usbRelayManager.turnRelayOff();
+      const status = this.usbRelayManager.getStatus();
       this.sendJson(res, 200, {
         success: true,
         message: 'Relay turned OFF',
-        state: 'off',
+        state: status.relayState,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
