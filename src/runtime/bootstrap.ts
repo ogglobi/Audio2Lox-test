@@ -248,6 +248,7 @@ export function createRuntime(): Runtime {
   let httpService: HttpService | null = null;
   let networkService: NetworkService | null = null;
   let loxoneService: LoxoneHttpService | null = null;
+  let snapclientManagerRef: SnapclientManager | null = null;
   let restartInFlight = false;
 
   async function handleReinitialize(): Promise<boolean> {
@@ -346,6 +347,7 @@ export function createRuntime(): Runtime {
     // Auto-generate /etc/asound.conf and start SnapclientManager
     const audioScanner = getAudioDeviceScanner();
     const snapclientManager = new SnapclientManager();
+    snapclientManagerRef = snapclientManager;
     try {
       await generateAsoundConf(audioScanner);
       await snapclientManager.init();
@@ -462,7 +464,9 @@ export function createRuntime(): Runtime {
     if (httpService) {
       services.push({ name: 'http', stop: () => httpService!.stop() });
     }
-    services.push({ name: 'snapclients', stop: () => snapclientManager.shutdown() });
+    if (snapclientManagerRef) {
+      services.push({ name: 'snapclients', stop: () => snapclientManagerRef!.shutdown() });
+    }
 
     await Promise.all(
       services.map((service) =>
