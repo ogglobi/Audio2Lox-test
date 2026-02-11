@@ -8,16 +8,19 @@ import { createLogger } from '@/shared/logging/logger';
  * Nutzt HID-Gerät direkt (/dev/hidraw*) statt SerialPort
  * Funktioniert mit HID-Geräten die direkt vom Kernel erkannt werden
  *
- * Kommando-Format für USBRelay2:
- * - ON:  0xFF 0x01 0x01 (3 bytes)
- * - OFF: 0xFF 0x01 0x00 (3 bytes)
+ * Protokoll basiert auf dem offiziellen usbrelay-Projekt (github.com/darrylb123/usbrelay)
  *
- * Für Multi-Channel Relais:
- * - Channel 1 ON:  0xFF 0x01 0x01
- * - Channel 2 ON:  0xFF 0x02 0x01
- * - Channel 1 OFF: 0xFF 0x01 0x00
+ * Kommando-Format für DCTTECH USBRelay2 (direkt via /dev/hidraw):
+ * - Byte 0: State    → 0xFF = ON, 0xFD = OFF
+ * - Byte 1: Relay-Nr → 0x01-0x08
+ * - Byte 2-7: 0x00   (Padding auf 8 Bytes)
  *
- * Referenz: USBRelay2 (www.dcttech.com)
+ * Beispiele:
+ * - Relay 1 ON:  0xFF 0x01 0x00 0x00 0x00 0x00 0x00 0x00
+ * - Relay 1 OFF: 0xFD 0x01 0x00 0x00 0x00 0x00 0x00 0x00
+ * - Relay 2 ON:  0xFF 0x02 0x00 0x00 0x00 0x00 0x00 0x00
+ *
+ * Referenz: libusbrelay.c → operate_relay() → case DCTTECH
  */
 
 export interface USBRelayConfig {
@@ -151,7 +154,7 @@ export class USBRelayManager {
         this.stopTimeoutId = null;
       }
 
-      // Relais-Kommando senden: 0xFF [channel] 0x01 (ON)
+      // Relais-Kommando senden: 0xFF [channel] (ON per dcttech-Protokoll)
       const command = this.buildCommand(this.config.channel, true);
       await this.sendCommand(command);
 
@@ -189,7 +192,7 @@ export class USBRelayManager {
     }
 
     try {
-      // Relais-Kommando senden: 0xFF [channel] 0x00 (OFF)
+      // Relais-Kommando senden: 0xFD [channel] (OFF per dcttech-Protokoll)
       const command = this.buildCommand(this.config.channel, false);
       await this.sendCommand(command);
 
@@ -203,18 +206,23 @@ export class USBRelayManager {
   }
 
   /**
-   * Baut Relais-Kommando für USBRelay2
+   * Baut Relais-Kommando für DCTTECH USBRelay2
    *
-   * Format:
-   * Byte 0: 0xFF (Präfix)
-   * Byte 1: Channel (0x01-0x04)
-   * Byte 2: State (0x01 = ON, 0x00 = OFF)
+   * Protokoll (aus libusbrelay.c → operate_relay → case DCTTECH):
+   * Byte 0: State      → 0xFF = CMD_ON, 0xFD = CMD_OFF
+   * Byte 1: Relay-Nr   → 1-8
+   * Byte 2-7: 0x00     (Padding auf 8 Bytes, HID Report Size)
+   *
+   * Hinweis: Bei direktem hidraw-Zugriff entfällt die Report-ID (0x00),
+   * die hidapi intern als buf[0] sendet. Wir schreiben direkt 8 Datenbytes.
    */
   private buildCommand(channel: number, state: boolean): Buffer {
-    const command = Buffer.alloc(3);
-    command[0] = 0xff; // Präfix
-    command[1] = Math.min(Math.max(channel, 1), 4); // Channel 1-4
-    command[2] = state ? 0x01 : 0x00; // State
+    const CMD_ON = 0xff;
+    const CMD_OFF = 0xfd;
+    const command = Buffer.alloc(8); // 8 Bytes HID Report
+    command[0] = state ? CMD_ON : CMD_OFF; // State-Byte
+    command[1] = Math.min(Math.max(channel, 1), 8); // Relay-Nummer 1-8
+    // Bytes 2-7 bleiben 0x00 (Buffer.alloc ist zero-filled)
     return command;
   }
 
