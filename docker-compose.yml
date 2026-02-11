@@ -7,6 +7,9 @@ services:
       context: .
       dockerfile: ./Dockerfile
     restart: unless-stopped
+    # IMPORTANT: privileged mode needed to load kernel audio modules (snd_usb_audio)
+    # Alternative: cap_add: [SYS_MODULE] but privileged: true is simpler
+    privileged: true
     
     # Port-Mapping für Windows/Mac (network_mode: host funktioniert nur auf Linux)
     ports:
@@ -29,9 +32,9 @@ services:
     
     # USB Devices für Audio und Relais (Linux - aktiv auf Unraid!)
     devices:
-      - /dev/snd:/dev/snd                        # Audio/Soundkarte
-      - /dev/hidraw3:/dev/hidraw0                # USB Relais HID-Gerät (16c0:05df)
-      # Alternativ falls hidraw3 nicht existiert: /dev/usb/hiddev98:/dev/hiddev0
+      - /dev/snd:/dev/snd                         # ALSA Sound Core
+      - /dev/bus/usb:/dev/bus/usb                 # Full USB bus access (needed in privileged mode)
+      - /dev/hidraw0:/dev/hidraw0                 # USB Relais HID-Gerät (16c0:05df) → /dev/hidraw0
     
     # USB Relais PowerManager Konfiguration (HID-basiert)
     environment:

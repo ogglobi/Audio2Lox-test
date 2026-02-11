@@ -44,5 +44,9 @@ COPY --from=builder --chown=node:node /app/public ./public
 COPY --from=builder --chown=node:node /app/node_modules ./node_modules
 COPY --from=builder --chown=node:node /app/package*.json ./
 RUN mkdir -p /app/data && chown -R node:node /app/data
-# Start the application
+# Copy entrypoint script to initialize audio modules
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+# Use entrypoint to load kernel modules before starting app
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["node", "dist/server.js"]
