@@ -635,6 +635,11 @@ export class AdminApiHandler {
       },
       {
         method: 'GET',
+        pattern: /^\/audio\/outputs$/,
+        handler: async (_req, res) => this.handleAudioOutputs(res),
+      },
+      {
+        method: 'GET',
         pattern: /^\/audio\/squeezelite\/players$/,
         handler: async (_req, res) => this.handleSqueezelitePlayers(res),
       },
@@ -2879,6 +2884,7 @@ export class AdminApiHandler {
           name: device.name,
           longName: device.longName,
           driver: device.driver,
+          maxChannels: device.maxChannels ?? 2,
           channels: (device.channels || []).map(ch => ({
             id: ch.id,
             name: ch.name,
@@ -2890,6 +2896,46 @@ export class AdminApiHandler {
       const message = err instanceof Error ? err.message : String(err);
       this.log.error('Failed to get audio devices', { message });
       this.sendJson(res, 500, { error: 'Failed to discover audio devices', details: message });
+    }
+  }
+
+  /**
+   * GET /admin/api/audio/outputs
+   * Returns hardware cards with max channels plus virtual ALSA devices from /etc/asound.conf.
+   */
+  private async handleAudioOutputs(res: ServerResponse): Promise<void> {
+    try {
+      const scanner = getAudioDeviceScanner();
+      const [devices, virtualDevices] = await Promise.all([
+        scanner.getDevices(),
+        scanner.getVirtualDevices(),
+      ]);
+
+      // Build a summary of physical cards (playback only)
+      const cards = devices.map((d) => ({
+        id: d.id,
+        cardId: d.cardId,
+        name: d.longName || d.name,
+        maxChannels: d.maxChannels ?? 2,
+        playbackDevices: d.channels
+          .filter((ch) => ch.direction === 'playback')
+          .map((ch) => ({ id: ch.id, name: ch.name })),
+      }));
+
+      this.sendJson(res, 200, {
+        cards,
+        virtualDevices: virtualDevices.map((v) => ({
+          id: v.id,
+          mode: v.mode,
+          cardId: v.cardId,
+          channels: v.outputChannels,
+          label: v.label,
+        })),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.log.error('Failed to get audio outputs', { message });
+      this.sendJson(res, 500, { error: 'Failed to discover audio outputs', details: message });
     }
   }
 

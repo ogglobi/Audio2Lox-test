@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { createLogger } from '@/shared/logging/logger';
 
 /**
@@ -11,6 +12,7 @@ export interface AudioDevice {
   name: string;
   longName: string;
   driver: string;
+  maxChannels: number;
   channels: AudioChannel[];
 }
 
@@ -24,6 +26,22 @@ export interface AudioChannel {
   cardId: number;
   deviceId: number;
   subdeviceCount: number;
+}
+
+/**
+ * A virtual ALSA device defined in /etc/asound.conf.
+ */
+export interface VirtualAlsaDevice {
+  /** PCM name, e.g. "card0_ch0", "card1_stereo01" */
+  id: string;
+  /** "mono" or "stereo" */
+  mode: 'mono' | 'stereo';
+  /** Physical card number */
+  cardId: number;
+  /** Output channel index(es) */
+  outputChannels: number[];
+  /** Human-readable label */
+  label: string;
 }
 
 /**
@@ -45,21 +63,45 @@ export class AudioDeviceScanner {
   }
 
   /**
-   * Scan ALSA devices using arecord/aplay and amixer.
+   * Get virtual ALSA devices defined in /etc/asound.conf.
+   */
+  async getVirtualDevices(): Promise<VirtualAlsaDevice[]> {
+    try {
+      const content = await readFile('/etc/asound.conf', 'utf-8');
+      return this.parseAsoundConf(content);
+    } catch {
+      this.log.debug('No /etc/asound.conf or parse error');
+      return [];
+    }
+  }
+
+  /**
+   * Scan ALSA devices using arecord/aplay.
    */
   private async scanAlsaDevices(): Promise<AudioDevice[]> {
     const devices: Map<string, AudioDevice> = new Map();
 
-    // Try to get device list from arecord -l
     const recordList = await this.execShellCommand('arecord -l 2>/dev/null || true');
     if (recordList) {
       this.parseAlsaList(recordList, 'capture', devices);
     }
 
-    // Try to get device list from aplay -l
     const playList = await this.execShellCommand('aplay -l 2>/dev/null || true');
     if (playList) {
       this.parseAlsaList(playList, 'playback', devices);
+    }
+
+    // Detect max channels for each playback device
+    for (const device of devices.values()) {
+      const playbackChannels = device.channels.filter(
+        (ch) => ch.direction === 'playback',
+      );
+      if (playbackChannels.length > 0) {
+        const maxCh = await this.detectMaxChannels(
+          `hw:${device.cardId},${playbackChannels[0].deviceId}`,
+        );
+        device.maxChannels = maxCh;
+      }
     }
 
     return Array.from(devices.values());
@@ -77,10 +119,13 @@ export class AudioDeviceScanner {
   }
 
   /**
-   * Parse arecord/aplay output format:
-   * card 0: PCH [HDA Intel PCH], device 0: ALC892 Analog [ALC892 Analog]
-   *   Subdevices: 1/1
-   *   Subdevice #0: subdevice #0
+   * Parse arecord/aplay output format.
+   * Lines look like:
+   *   card 0: Generic [HD-Audio Generic], device 0: ALC1220 Analog [ALC1220 Analog]
+   *     Subdevices: 1/1
+   *     Subdevice #0: subdevice #0
+   *
+   * Card number and device number are on the SAME line.
    */
   private parseAlsaList(
     output: string,
@@ -88,63 +133,55 @@ export class AudioDeviceScanner {
     devices: Map<string, AudioDevice>,
   ): void {
     const lines = output.split('\n');
-    let currentCard: number | null = null;
-    let currentCardName = '';
+    let lastChannel: AudioChannel | null = null;
 
     for (const line of lines) {
-      const cardMatch = line.match(/^card\s+(\d+):\s+(\w+)\s+\[([^\]]+)\]/);
-      if (cardMatch) {
-        currentCard = parseInt(cardMatch[1], 10);
-        const cardId = cardMatch[2];
-        currentCardName = cardMatch[3];
+      // Match: card N: ID [Name], device M: DevName [DevLongName]
+      const fullMatch = line.match(
+        /^card\s+(\d+):\s+(\w+)\s+\[([^\]]+)\],\s*device\s+(\d+):\s+([^\[]+)\[([^\]]+)\]/,
+      );
+      if (fullMatch) {
+        const cardNum = parseInt(fullMatch[1], 10);
+        const cardId = fullMatch[2];
+        const cardName = fullMatch[3];
+        const devNum = parseInt(fullMatch[4], 10);
+        const devName = fullMatch[5].trim();
 
-        const deviceKey = `hw:${currentCard}`;
+        const deviceKey = `hw:${cardNum}`;
         if (!devices.has(deviceKey)) {
           devices.set(deviceKey, {
             id: deviceKey,
-            cardId: currentCard,
+            cardId: cardNum,
             deviceId: 0,
             name: cardId,
-            longName: currentCardName,
-            driver: '', // Will be filled if available
+            longName: cardName,
+            driver: '',
+            maxChannels: 2,
             channels: [],
           });
         }
-        continue;
-      }
 
-      const deviceMatch = line.match(/^\s+device\s+(\d+):\s+([^\[]+)\s+\[([^\]]+)\]/);
-      if (deviceMatch && currentCard !== null) {
-        const deviceId = parseInt(deviceMatch[1], 10);
-        const deviceName = deviceMatch[2].trim();
-        const deviceLongName = deviceMatch[3];
-
-        const channelId = `hw:${currentCard},${deviceId}`;
+        const channelId = `hw:${cardNum},${devNum}`;
         const channel: AudioChannel = {
           id: channelId,
-          name: deviceName,
+          name: devName,
           direction,
-          cardId: currentCard,
-          deviceId,
+          cardId: cardNum,
+          deviceId: devNum,
           subdeviceCount: 1,
         };
 
-        const device = devices.get(`hw:${currentCard}`);
-        if (device) {
-          // Update with more specific info
-          device.longName = currentCardName;
-          device.channels.push(channel);
-        }
+        const device = devices.get(deviceKey)!;
+        device.longName = cardName;
+        device.channels.push(channel);
+        lastChannel = channel;
+        continue;
       }
 
       // Parse subdevice count
       const subdevMatch = line.match(/^\s+Subdevices:\s+(\d+)\/(\d+)/);
-      if (subdevMatch && currentCard !== null) {
-        const totalSubdevices = parseInt(subdevMatch[2], 10);
-        const device = devices.get(`hw:${currentCard}`);
-        if (device && device.channels.length > 0) {
-          device.channels[device.channels.length - 1].subdeviceCount = totalSubdevices;
-        }
+      if (subdevMatch && lastChannel) {
+        lastChannel.subdeviceCount = parseInt(subdevMatch[2], 10);
       }
     }
   }
@@ -188,6 +225,82 @@ export class AudioDeviceScanner {
     }
 
     return info;
+  }
+
+  /**
+   * Detect max channel count for an ALSA hardware device via hw_params.
+   */
+  private async detectMaxChannels(hwDevice: string): Promise<number> {
+    try {
+      const output = await this.execShellCommand(
+        `aplay -D ${hwDevice} --dump-hw-params /dev/null 2>&1 || true`,
+      );
+      // Look for CHANNELS line, e.g.: "CHANNELS: [2 8]" or "CHANNELS: 2"
+      const chMatch = output.match(/CHANNELS:\s*(?:\[(\d+)\s+(\d+)\]|(\d+))/i);
+      if (chMatch) {
+        // Range [min max] → take max; single value → take it
+        const max = chMatch[2] || chMatch[3] || chMatch[1];
+        if (max) return parseInt(max, 10);
+      }
+    } catch {
+      this.log.debug('Failed to detect max channels for', { hwDevice });
+    }
+    return 2; // default stereo
+  }
+
+  /**
+   * Parse /etc/asound.conf to find virtual PCM devices.
+   * Looks for our naming convention: card<N>_ch<C> (mono) and card<N>_stereo<A><B>.
+   */
+  private parseAsoundConf(content: string): VirtualAlsaDevice[] {
+    const devices: VirtualAlsaDevice[] = [];
+
+    // Channel labels for nice display
+    const chLabels = [
+      'Front-Left',
+      'Front-Right',
+      'Rear-Left',
+      'Rear-Right',
+      'Center',
+      'LFE/Sub',
+      'Side-Left',
+      'Side-Right',
+    ];
+
+    // Find all pcm.XXX { blocks
+    const pcmPattern = /^pcm\.(card(\d+)(?:d(\d+))?_(ch(\d+)|stereo(\d)(\d)))\s*\{/gm;
+    let match;
+    while ((match = pcmPattern.exec(content)) !== null) {
+      const id = match[1];
+      const cardId = parseInt(match[2], 10);
+      const isMono = match[5] !== undefined;
+
+      if (isMono) {
+        const ch = parseInt(match[5], 10);
+        const label = ch < chLabels.length ? chLabels[ch] : `Ch${ch}`;
+        devices.push({
+          id,
+          mode: 'mono',
+          cardId,
+          outputChannels: [ch],
+          label: `Card ${cardId} → Ch ${ch} (${label})`,
+        });
+      } else {
+        const chA = parseInt(match[6], 10);
+        const chB = parseInt(match[7], 10);
+        const labelA = chA < chLabels.length ? chLabels[chA] : `Ch${chA}`;
+        const labelB = chB < chLabels.length ? chLabels[chB] : `Ch${chB}`;
+        devices.push({
+          id,
+          mode: 'stereo',
+          cardId,
+          outputChannels: [chA, chB],
+          label: `Card ${cardId} → Ch ${chA}+${chB} (${labelA}/${labelB})`,
+        });
+      }
+    }
+
+    return devices;
   }
 }
 

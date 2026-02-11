@@ -353,54 +353,88 @@
       const list = document.getElementById('zonesList');
       list.innerHTML = '<div class="loading">Loading zones...</div>';
       try {
-        // Fetch zones, transport definitions, ALSA devices in parallel
-        const [configRes, transportsRes, devicesRes] = await Promise.all([
+        // Fetch zones, transport definitions, ALSA outputs in parallel
+        const [configRes, transportsRes, outputsRes] = await Promise.all([
           fetch('/admin/api/config'),
           fetch('/admin/api/transports'),
-          fetch('/admin/api/audio/devices'),
+          fetch('/admin/api/audio/outputs'),
         ]);
         if (!configRes.ok) throw new Error('Failed to load config');
         if (!transportsRes.ok) throw new Error('Failed to load transports');
         const configData = await configRes.json();
         const transportsData = await transportsRes.json();
-        const devicesData = devicesRes.ok ? await devicesRes.json() : { devices: [] };
+        const outputsData = outputsRes.ok ? await outputsRes.json() : { cards: [], virtualDevices: [] };
 
         const zones = configData.config?.zones || [];
         const transportDefs = transportsData.transports || [];
-        const audioDevices = devicesData.devices || [];
+        const cards = outputsData.cards || [];
+        const virtualDevices = outputsData.virtualDevices || [];
 
         // Cache for use by other methods
         this._transportDefs = transportDefs;
-        this._audioDevices = audioDevices;
+        this._cards = cards;
+        this._virtualDevices = virtualDevices;
 
         if (zones.length === 0) {
           list.innerHTML = '<div class="error">No zones configured</div>';
           return;
         }
 
-        // Build ALSA reference panel
-        const alsaPanel = audioDevices.length > 0 ? `
+        // Build ALSA outputs panel — show cards + virtual devices
+        let alsaPanel = '';
+        if (cards.length > 0) {
+          const monoDevs = virtualDevices.filter(v => v.mode === 'mono');
+          const stereoDevs = virtualDevices.filter(v => v.mode === 'stereo');
+
+          alsaPanel = `
           <div style="background:#e8f5e9; border:1px solid #c8e6c9; border-radius:8px; padding:12px; margin-bottom:15px;">
-            <div style="font-weight:600; color:#2e7d32; margin-bottom:8px;">🔊 Available ALSA Outputs</div>
-            ${audioDevices.map(dev => {
-              const playbackChannels = (dev.channels || []).filter(ch => ch.direction === 'playback');
-              if (playbackChannels.length === 0) return '';
-              return `<div style="margin-bottom:6px;">
-                <span style="font-weight:600;">${dev.longName || dev.name}</span>
-                <span style="color:#666; font-size:11px; margin-left:4px;">(${dev.id})</span>
-                <div style="margin-top:2px;">
-                  ${playbackChannels.map(ch =>
-                    `<span class="channel-badge channel-playback" style="font-family:monospace;">${ch.id}</span>
-                     <span style="font-size:11px; color:#666;">${ch.name}</span>`
-                  ).join(' ')}
-                </div>
-              </div>`;
-            }).join('')}
-            <div style="font-size:11px; color:#666; margin-top:6px;">
-              💡 Use these ALSA device IDs when configuring Snapcast clients (e.g. <code>snapclient -s &lt;server&gt; -o alsa:device=hw:1,0</code>)
+            <div style="font-weight:600; color:#2e7d32; margin-bottom:8px;">🔊 Audio Hardware</div>
+            ${cards.map(card => `
+              <div style="margin-bottom:6px;">
+                <span style="font-weight:600;">${card.name}</span>
+                <span style="color:#666; font-size:11px; margin-left:4px;">(${card.id}, ${card.maxChannels} channels)</span>
+                ${(card.playbackDevices || []).map(pd =>
+                  `<span class="channel-badge channel-playback" style="font-family:monospace;">${pd.id}</span>`
+                ).join(' ')}
+              </div>
+            `).join('')}
+
+            ${virtualDevices.length > 0 ? `
+              <div style="margin-top:10px; padding-top:8px; border-top:1px solid #c8e6c9;">
+                <div style="font-weight:600; color:#2e7d32; margin-bottom:6px;">🎛️ Virtual ALSA Outputs (from /etc/asound.conf)</div>
+                ${monoDevs.length > 0 ? `
+                  <div style="margin-bottom:6px;">
+                    <span style="font-size:12px; font-weight:600; color:#555;">Mono (single speaker):</span>
+                    <div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;">
+                      ${monoDevs.map(v =>
+                        `<span class="channel-badge channel-playback" style="font-family:monospace; font-size:11px;" title="${v.label}">${v.id}</span>`
+                      ).join('')}
+                    </div>
+                  </div>
+                ` : ''}
+                ${stereoDevs.length > 0 ? `
+                  <div style="margin-bottom:6px;">
+                    <span style="font-size:12px; font-weight:600; color:#555;">Stereo (speaker pair):</span>
+                    <div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;">
+                      ${stereoDevs.map(v =>
+                        `<span class="channel-badge channel-capture" style="font-family:monospace; font-size:11px;" title="${v.label}">${v.id}</span>`
+                      ).join('')}
+                    </div>
+                  </div>
+                ` : ''}
+              </div>
+            ` : `
+              <div style="margin-top:8px; font-size:11px; color:#999;">
+                ⚠️ No virtual devices found. Run <code>bash setup/generate-asound.sh --install</code> on the server to create per-channel outputs.
+              </div>
+            `}
+
+            <div style="font-size:11px; color:#666; margin-top:8px;">
+              💡 Use these as Snapclient <strong>--soundcard</strong> value. Each virtual device = one zone output.
             </div>
           </div>
-        ` : '';
+          `;
+        }
 
         list.innerHTML = alsaPanel + zones.map(zone => {
           const currentTransport = (zone.transports || [])[0] || null;
