@@ -1,43 +1,24 @@
 #!/bin/bash
-# entrypoint.sh - Initialize audio and other kernel modules, then start the app
+# entrypoint.sh - Start Snapcast Server and Audio2Lox application
 
 set -e
 
-echo "[entrypoint] Starting Audio2Lox Server..."
+echo "[entrypoint] Starting Audio2Lox with Snapcast Server..."
 
-# Load kernel audio modules for USB devices (if privileged)
-if [ -w /sys/module ]; then
-    echo "[entrypoint] Loading audio kernel modules..."
-    
-    # Load ALSA/SND modules for USB audio support
-    modprobe -v snd_usb_audio 2>&1 || echo "[entrypoint] Warning: snd_usb_audio failed (may already be loaded)"
-    modprobe -v snd_usbmidi_ep0 2>&1 || true
-    
-    # Wait a moment for devices to appear
-    sleep 1
-    
-    # Verify audio subsystem
-    if [ -f /proc/asound/cards ]; then
-        echo "[entrypoint] ✓ ALSA soundcards detected:"
-        cat /proc/asound/cards
-    else
-        echo "[entrypoint] ⚠ Warning: No ALSA soundcards found yet"
-    fi
+# Start Snapcast Server in background (multiroom audio routing)
+if command -v snapserver &> /dev/null; then
+    echo "[entrypoint] Starting Snapcast Server (port 1704)..."
+    snapserver --daemonize || echo "[entrypoint] Warning: snapserver may need /etc/snapserver.conf"
+    sleep 2
+    echo "[entrypoint] ✓ Snapcast Server initialized"
 else
-    echo "[entrypoint] ⚠ Warning: Not running privileged - cannot load kernel modules"
-    echo "[entrypoint]   Audio may not work unless run with: privileged: true or cap_add: [SYS_MODULE]"
+    echo "[entrypoint] ⚠ WARNING: snapserver NOT FOUND - audio will not work!"
 fi
 
-# Set correct permissions for audio devices
-if [ -d /dev/snd ]; then
-    echo "[entrypoint] Setting audio device permissions..."
-    chmod 666 /dev/snd/* 2>/dev/null || true
+# USB device permissions for Relay
+if [ -d /dev/bus/usb ]; then
+    chmod 666 /dev/bus/usb* 2>/dev/null || true
 fi
 
-# Display USB devices (for debugging)
-echo "[entrypoint] USB devices present:"
-lsusb 2>/dev/null | grep -E "16c0:05df|0d8c:0102" || echo "[entrypoint] (No recognized devices found)"
-
-# Start the application
-echo "[entrypoint] Starting Node.js application..."
+echo "[entrypoint] Starting Node.js Audio2Lox application..."
 exec "$@"
