@@ -409,7 +409,10 @@
             <div class="device-name">Power Manager Status</div>
             <div style="margin: 15px 0;">
               <p style="margin: 10px 0;"><strong>Status:</strong> <span style="color: #4caf50; font-weight: 600;">✓ ${data.message}</span></p>
-              <p style="margin: 10px 0;"><strong>State:</strong> <span style="color: #4caf50; font-weight: 600;">${data.state.toUpperCase()}</span></p>
+              <p style="margin: 10px 0;"><strong>Initialized:</strong> <span style="color: ${data.initialized ? '#4caf50' : '#f44336'}; font-weight: 600;">${data.initialized ? '✓ Yes' : '✗ No'}</span></p>
+              <p style="margin: 10px 0;"><strong>Relay State:</strong> <span style="color: ${data.relayState === 'on' ? '#4caf50' : '#999'}; font-weight: 600;">${(data.relayState || 'unknown').toUpperCase()}</span></p>
+              <p style="margin: 10px 0;"><strong>Port:</strong> <span style="font-family: monospace;">${data.port}</span></p>
+              <p style="margin: 10px 0;"><strong>Channel:</strong> ${data.channel}</p>
             </div>
             
             <div style="margin: 15px 0;">
@@ -456,10 +459,14 @@
         
         select.innerHTML = data.ports.map(port => {
           let label = port.path;
-          if (port.manufacturer || port.product) {
-            label += ` - ${port.manufacturer || ''}${port.manufacturer && port.product ? ' / ' : ''}${port.product || ''}`;
+          if (port.product) {
+            label += ` - ${port.product}`;
           }
-          return `<option value="${port.path}" ${port.path === data.current ? 'selected' : ''}>${label}</option>`;
+          if (port.isRelay) {
+            label += ' ⚡ RELAY';
+          }
+          const isCurrent = port.path === data.current;
+          return `<option value="${port.path}" ${isCurrent ? 'selected' : ''}>${label}${isCurrent ? ' (Active)' : ''}</option>`;
         }).join('');
       } catch (err) {
         console.error('Load USB ports error:', err);

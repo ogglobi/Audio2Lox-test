@@ -3051,27 +3051,52 @@ export class AdminApiHandler {
 
   /**
    * GET /admin/api/powermanager/ports
-   * Returns list of available USB ports for relay connection
+   * Scans /sys/class/hidraw/ and /dev/ttyUSB* for real devices
    */
   private async handlePowerManagerPorts(res: ServerResponse): Promise<void> {
     try {
-      // Get currently configured port from environment
-      const currentPort = process.env.PM_USB_PORT || '/dev/ttyUSB0';
-      
-      // Return available HID and serial ports for Unraid
-      const ports = [
-        { path: '/dev/hidraw0', manufacturer: 'HID', product: 'Device 0' },
-        { path: '/dev/hidraw1', manufacturer: 'HID', product: 'Device 1' },
-        { path: '/dev/hidraw2', manufacturer: 'HID', product: 'Device 2' },
-        { path: '/dev/hidraw3', manufacturer: 'HID', product: 'Device 3 (USBRelay2)' },
-        { path: '/dev/usb/hiddev0', manufacturer: 'HID', product: 'Dev 0' },
-        { path: '/dev/usb/hiddev1', manufacturer: 'HID', product: 'Dev 1' },
-        { path: '/dev/usb/hiddev2', manufacturer: 'HID', product: 'Dev 2' },
-        { path: '/dev/ttyUSB0', manufacturer: 'Serial', product: 'Port 0' },
-        { path: '/dev/ttyUSB1', manufacturer: 'Serial', product: 'Port 1' },
-        { path: 'COM3', manufacturer: 'Windows', product: 'COM Port 3' },
-        { path: 'COM4', manufacturer: 'Windows', product: 'COM Port 4' },
-      ];
+      const currentPort = this.usbRelayManager?.getStatus().port || process.env.PM_USB_PORT || '/dev/hidraw0';
+      const ports: { path: string; manufacturer: string; product: string; isRelay: boolean }[] = [];
+
+      // Scan real HID devices from /sys/class/hidraw/
+      try {
+        const hidrawDir = '/sys/class/hidraw';
+        const entries = await fs.readdir(hidrawDir).catch(() => [] as string[]);
+        for (const entry of entries) {
+          try {
+            const ueventPath = join(hidrawDir, entry, 'device', 'uevent');
+            const uevent = await fs.readFile(ueventPath, 'utf-8').catch(() => '');
+            const name = uevent.match(/HID_NAME=(.+)/)?.[1] || 'Unknown HID Device';
+            const hidId = uevent.match(/HID_ID=(.+)/)?.[1] || '';
+            // Check if this looks like a relay (dcttech vendor 16C0:05DF)
+            const isRelay = hidId.toLowerCase().includes('000016c0') && hidId.toLowerCase().includes('000005df');
+            ports.push({
+              path: `/dev/${entry}`,
+              manufacturer: 'HID',
+              product: name,
+              isRelay,
+            });
+          } catch { /* skip unreadable entries */ }
+        }
+      } catch { /* /sys/class/hidraw may not exist on non-Linux */ }
+
+      // Scan serial ports /dev/ttyUSB*
+      try {
+        const devEntries = await fs.readdir('/dev').catch(() => [] as string[]);
+        for (const entry of devEntries) {
+          if (entry.startsWith('ttyUSB') || entry.startsWith('ttyACM')) {
+            ports.push({
+              path: `/dev/${entry}`,
+              manufacturer: 'Serial',
+              product: `Serial Port ${entry}`,
+              isRelay: false,
+            });
+          }
+        }
+      } catch { /* /dev scan failed */ }
+
+      // Sort: relay devices first
+      ports.sort((a, b) => (b.isRelay ? 1 : 0) - (a.isRelay ? 1 : 0));
 
       this.sendJson(res, 200, {
         ports,
