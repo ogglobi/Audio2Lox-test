@@ -228,9 +228,14 @@ export class AudioDeviceScanner {
   }
 
   /**
-   * Detect max channel count for an ALSA hardware device via hw_params.
+   * Detect max channel count for an ALSA hardware device.
+   *
+   * Strategy:
+   * 1. Try `aplay --dump-hw-params` (works for onboard / PCI cards)
+   * 2. Fallback: parse `/proc/asound/cardN/stream0` (works for USB audio)
    */
   private async detectMaxChannels(hwDevice: string): Promise<number> {
+    // --- Strategy 1: hw_params ---
     try {
       const output = await this.execShellCommand(
         `aplay -D ${hwDevice} --dump-hw-params /dev/null 2>&1 || true`,
@@ -238,13 +243,37 @@ export class AudioDeviceScanner {
       // Look for CHANNELS line, e.g.: "CHANNELS: [2 8]" or "CHANNELS: 2"
       const chMatch = output.match(/CHANNELS:\s*(?:\[(\d+)\s+(\d+)\]|(\d+))/i);
       if (chMatch) {
-        // Range [min max] → take max; single value → take it
         const max = chMatch[2] || chMatch[3] || chMatch[1];
-        if (max) return parseInt(max, 10);
+        if (max) {
+          const val = parseInt(max, 10);
+          this.log.debug('Detected max channels via hw_params', { hwDevice, maxChannels: val });
+          return val;
+        }
       }
     } catch {
-      this.log.debug('Failed to detect max channels for', { hwDevice });
+      // hw_params failed – try fallback
     }
+
+    // --- Strategy 2: /proc/asound/cardN/stream0 (USB devices) ---
+    const cardMatch = hwDevice.match(/hw:(\d+)/);
+    if (cardMatch) {
+      try {
+        const streamPath = `/proc/asound/card${cardMatch[1]}/stream0`;
+        const stream = await this.execShellCommand(`cat ${streamPath} 2>/dev/null || true`);
+        // Find all "Channels: N" lines in Playback section and take the maximum
+        const playbackSection = stream.split(/Capture:/i)[0] || stream;
+        const channelMatches = [...playbackSection.matchAll(/Channels:\s*(\d+)/gi)];
+        if (channelMatches.length > 0) {
+          const maxCh = Math.max(...channelMatches.map((m) => parseInt(m[1], 10)));
+          this.log.debug('Detected max channels via stream0', { hwDevice, maxChannels: maxCh });
+          return maxCh;
+        }
+      } catch {
+        // stream0 not available
+      }
+    }
+
+    this.log.debug('Could not detect max channels, defaulting to 2', { hwDevice });
     return 2; // default stereo
   }
 
