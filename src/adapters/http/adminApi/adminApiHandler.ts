@@ -568,10 +568,15 @@ export class AdminApiHandler {
             if (res.writableEnded) {
               return;
             }
-            if (!body || !body.type) {
+            // Accept both "type" and "id" – normalise to "id" which
+            // is the key buildZoneOutputs() matches on.
+            const outputId: string | undefined = body?.id ?? body?.type;
+            if (!body || !outputId) {
               this.sendJson(res, 400, { error: 'invalid-output-config' });
               return;
             }
+            const { type: _type, ...rest } = body;
+            const entry = { ...rest, id: outputId };
             await this.configPort.updateConfig(async (config) => {
               const zoneIndex = config.zones?.findIndex((z: any) => z.id === zoneId) ?? -1;
               if (zoneIndex >= 0 && config.zones && config.zones[zoneIndex]) {
@@ -579,11 +584,11 @@ export class AdminApiHandler {
                   config.zones[zoneIndex].transports = [];
                 }
                 const transports = config.zones[zoneIndex].transports as any[];
-                const idx = transports.findIndex((t: any) => t.type === body.type);
+                const idx = transports.findIndex((t: any) => t.id === outputId);
                 if (idx >= 0) {
-                  transports[idx] = body;
+                  transports[idx] = entry;
                 } else {
-                  transports.push(body);
+                  transports.push(entry);
                 }
               }
             });
@@ -591,6 +596,34 @@ export class AdminApiHandler {
           } catch (err) {
             this.log.error('zone output update failed', { err });
             this.sendJson(res, 500, { error: 'zone-update-failed', message: String(err) });
+          }
+        },
+      },
+      {
+        method: 'DELETE',
+        pattern: /^\/zones\/(\d+)\/output$/,
+        handler: async (_req, res, match) => {
+          try {
+            const zoneId = parseInt(match[1] ?? '0', 10);
+            if (!zoneId) {
+              this.sendJson(res, 400, { error: 'invalid-zone-id' });
+              return;
+            }
+            await this.configPort.updateConfig(async (config) => {
+              const zoneIndex =
+                config.zones?.findIndex((z: any) => z.id === zoneId) ?? -1;
+              if (zoneIndex >= 0 && config.zones && config.zones[zoneIndex]) {
+                config.zones[zoneIndex].transports = [];
+                delete (config.zones[zoneIndex] as any).output;
+              }
+            });
+            this.sendJson(res, 200, { success: true, zone: zoneId });
+          } catch (err) {
+            this.log.error('zone output delete failed', { err });
+            this.sendJson(res, 500, {
+              error: 'zone-delete-failed',
+              message: String(err),
+            });
           }
         },
       },

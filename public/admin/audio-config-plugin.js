@@ -353,33 +353,228 @@
       const list = document.getElementById('zonesList');
       list.innerHTML = '<div class="loading">Loading zones...</div>';
       try {
-        const response = await fetch('/admin/api/config');
-        if (!response.ok) throw new Error('Failed to load zones');
-        const data = await response.json();
-        const zones = data.config?.zones || [];
+        // Fetch zones, transport definitions, ALSA devices in parallel
+        const [configRes, transportsRes, devicesRes] = await Promise.all([
+          fetch('/admin/api/config'),
+          fetch('/admin/api/transports'),
+          fetch('/admin/api/audio/devices'),
+        ]);
+        if (!configRes.ok) throw new Error('Failed to load config');
+        if (!transportsRes.ok) throw new Error('Failed to load transports');
+        const configData = await configRes.json();
+        const transportsData = await transportsRes.json();
+        const devicesData = devicesRes.ok ? await devicesRes.json() : { devices: [] };
+
+        const zones = configData.config?.zones || [];
+        const transportDefs = transportsData.transports || [];
+        const audioDevices = devicesData.devices || [];
+
+        // Cache for use by other methods
+        this._transportDefs = transportDefs;
+        this._audioDevices = audioDevices;
+
         if (zones.length === 0) {
           list.innerHTML = '<div class="error">No zones configured</div>';
           return;
         }
-        list.innerHTML = zones.map(zone => `
-          <div class="device-card">
-            <div class="device-name">Zone ${zone.id}: ${zone.name || 'Unnamed'}</div>
-            <div style="margin-bottom: 10px; color: #666; font-size: 14px;">
-              ${zone.name ? `<p><strong>Name:</strong> ${zone.name}</p>` : ''}
-              <p><strong>Transports:</strong> ${(zone.transports || []).map(t => t.type || 'unknown').join(', ') || 'None'}</p>
+
+        // Build ALSA reference panel
+        const alsaPanel = audioDevices.length > 0 ? `
+          <div style="background:#e8f5e9; border:1px solid #c8e6c9; border-radius:8px; padding:12px; margin-bottom:15px;">
+            <div style="font-weight:600; color:#2e7d32; margin-bottom:8px;">🔊 Available ALSA Outputs</div>
+            ${audioDevices.map(dev => {
+              const playbackChannels = (dev.channels || []).filter(ch => ch.direction === 'playback');
+              if (playbackChannels.length === 0) return '';
+              return `<div style="margin-bottom:6px;">
+                <span style="font-weight:600;">${dev.longName || dev.name}</span>
+                <span style="color:#666; font-size:11px; margin-left:4px;">(${dev.id})</span>
+                <div style="margin-top:2px;">
+                  ${playbackChannels.map(ch =>
+                    `<span class="channel-badge channel-playback" style="font-family:monospace;">${ch.id}</span>
+                     <span style="font-size:11px; color:#666;">${ch.name}</span>`
+                  ).join(' ')}
+                </div>
+              </div>`;
+            }).join('')}
+            <div style="font-size:11px; color:#666; margin-top:6px;">
+              💡 Use these ALSA device IDs when configuring Snapcast clients (e.g. <code>snapclient -s &lt;server&gt; -o alsa:device=hw:1,0</code>)
             </div>
-            <select style="padding: 8px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 10px; width: 100%;">
-              <option>-- Select output type --</option>
-              <option>Squeezelite</option>
-              <option>AirPlay</option>
-              <option>DLNA</option>
-              <option>Snapcast</option>
-            </select>
           </div>
-        `).join('');
+        ` : '';
+
+        list.innerHTML = alsaPanel + zones.map(zone => {
+          const currentTransport = (zone.transports || [])[0] || null;
+          const currentTypeId = currentTransport ? currentTransport.id : '';
+
+          return `
+            <div class="device-card" id="zone-card-${zone.id}">
+              <div class="device-name">Zone ${zone.id}: ${zone.name || 'Unnamed'}</div>
+
+              <div style="margin: 10px 0; color: #666; font-size: 13px;">
+                <strong>Current:</strong>
+                ${currentTransport
+                  ? `<span style="color:#667eea; font-weight:600;">${this._labelForType(currentTypeId)}</span>`
+                  : '<span style="color:#999;">None</span>'}
+              </div>
+
+              <!-- Output type selector -->
+              <label style="display:block; margin-bottom:4px; font-weight:600; font-size:12px; color:#555;">Output Type</label>
+              <select id="zone-type-${zone.id}" onchange="window.audioConfigPlugin.renderTypeFields(${zone.id})"
+                      style="padding:8px; border:1px solid #ddd; border-radius:4px; width:100%; margin-bottom:10px; background:white;">
+                <option value="">-- No output --</option>
+                ${transportDefs.map(t =>
+                  `<option value="${t.id}" ${t.id === currentTypeId ? 'selected' : ''}>${t.label}</option>`
+                ).join('')}
+              </select>
+
+              <!-- Dynamic fields container -->
+              <div id="zone-fields-${zone.id}" style="margin-bottom:10px;"></div>
+
+              <!-- Save / Remove buttons -->
+              <div style="display:flex; gap:8px; margin-top:10px;">
+                <button onclick="window.audioConfigPlugin.saveZoneOutput(${zone.id})"
+                        style="flex:1; padding:8px 12px; background:#4caf50; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:600;">
+                  💾 Save
+                </button>
+                <button onclick="window.audioConfigPlugin.removeZoneOutput(${zone.id})"
+                        style="padding:8px 12px; background:#f44336; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:600;">
+                  🗑️ Remove
+                </button>
+              </div>
+
+              <div id="zone-status-${zone.id}" style="margin-top:8px; font-size:12px;"></div>
+            </div>
+          `;
+        }).join('');
+
+        // Render dynamic fields for zones that already have a transport
+        // Attach current transport data to DOM for pre-filling fields
+        zones.forEach(zone => {
+          const currentTransport = (zone.transports || [])[0] || null;
+          const card = document.getElementById(`zone-card-${zone.id}`);
+          if (card && currentTransport) card.__currentTransport = currentTransport;
+          this.renderTypeFields(zone.id);
+        });
+
       } catch (err) {
         console.error('Zone load error:', err);
         list.innerHTML = `<div class="error">Error loading zones: ${err.message}</div>`;
+      }
+    },
+
+    /** Return display label for a transport type id */
+    _labelForType(typeId) {
+      if (!typeId) return 'None';
+      const def = (this._transportDefs || []).find(t => t.id === typeId);
+      return def ? def.label : typeId;
+    },
+
+    /** Render the type-specific config fields for a zone */
+    renderTypeFields(zoneId) {
+      const select = document.getElementById(`zone-type-${zoneId}`);
+      const container = document.getElementById(`zone-fields-${zoneId}`);
+      if (!select || !container) return;
+
+      const typeId = select.value;
+      if (!typeId) {
+        container.innerHTML = '';
+        return;
+      }
+
+      const def = (this._transportDefs || []).find(t => t.id === typeId);
+      if (!def || !def.fields || def.fields.length === 0) {
+        container.innerHTML = '<div style="color:#999; font-size:12px; padding:4px 0;">No additional configuration needed.</div>';
+        return;
+      }
+
+      // Retrieve current values from zone config (if any)
+      const card = document.getElementById(`zone-card-${zoneId}`);
+      const currentData = card?.__currentTransport || {};
+
+      container.innerHTML = def.fields.map(field => {
+        const currentVal = (currentData.id === typeId ? currentData[field.id] : '') || '';
+        return `
+          <div style="margin-bottom:8px;">
+            <label style="display:block; font-size:12px; font-weight:600; color:#555; margin-bottom:2px;">
+              ${field.label}${field.required ? ' <span style="color:#f44336;">*</span>' : ''}
+            </label>
+            ${this._renderFieldInput(zoneId, field, currentVal)}
+            ${field.description ? `<div style="font-size:11px; color:#999; margin-top:2px;">${field.description}</div>` : ''}
+          </div>
+        `;
+      }).join('');
+    },
+
+    /** Render a single field input – supports text and a special "alsa-device" selector */
+    _renderFieldInput(zoneId, field, currentVal) {
+      const inputId = `zone-field-${zoneId}-${field.id}`;
+      // Plain text field
+      return `<input type="text" id="${inputId}" value="${this._escAttr(currentVal)}"
+                placeholder="${this._escAttr(field.placeholder || '')}"
+                style="width:100%; padding:6px 8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box;" />`;
+    },
+
+    _escAttr(s) {
+      return String(s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    },
+
+    /** Save zone output config via POST /admin/api/zones/:id/output */
+    async saveZoneOutput(zoneId) {
+      const statusEl = document.getElementById(`zone-status-${zoneId}`);
+      const select = document.getElementById(`zone-type-${zoneId}`);
+      const typeId = select?.value;
+
+      if (!typeId) {
+        if (statusEl) statusEl.innerHTML = '<span style="color:#f44336;">Please select an output type first.</span>';
+        return;
+      }
+
+      // Gather field values
+      const def = (this._transportDefs || []).find(t => t.id === typeId);
+      const body = { type: typeId };
+      if (def && def.fields) {
+        for (const field of def.fields) {
+          const input = document.getElementById(`zone-field-${zoneId}-${field.id}`);
+          if (input) body[field.id] = input.value;
+        }
+      }
+
+      if (statusEl) statusEl.innerHTML = '<span style="color:#667eea;">Saving...</span>';
+
+      try {
+        const res = await fetch(`/admin/api/zones/${zoneId}/output`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || 'Save failed');
+        }
+        if (statusEl) statusEl.innerHTML = '<span style="color:#4caf50;">✓ Saved! Restart server to apply changes.</span>';
+      } catch (err) {
+        console.error('Save zone output error:', err);
+        if (statusEl) statusEl.innerHTML = `<span style="color:#f44336;">✗ ${err.message}</span>`;
+      }
+    },
+
+    /** Remove all transports from a zone */
+    async removeZoneOutput(zoneId) {
+      if (!confirm(`Remove output from Zone ${zoneId}?`)) return;
+      const statusEl = document.getElementById(`zone-status-${zoneId}`);
+      if (statusEl) statusEl.innerHTML = '<span style="color:#667eea;">Removing...</span>';
+
+      try {
+        const res = await fetch(`/admin/api/zones/${zoneId}/output`, {
+          method: 'DELETE',
+        });
+        if (!res.ok) throw new Error('Delete failed');
+        if (statusEl) statusEl.innerHTML = '<span style="color:#4caf50;">✓ Output removed.</span>';
+        // Reload after short delay
+        setTimeout(() => this.loadZones(), 800);
+      } catch (err) {
+        console.error('Remove zone output error:', err);
+        if (statusEl) statusEl.innerHTML = `<span style="color:#f44336;">✗ ${err.message}</span>`;
       }
     },
 
