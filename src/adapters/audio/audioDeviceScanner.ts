@@ -231,17 +231,21 @@ export class AudioDeviceScanner {
    * Detect max channel count for an ALSA hardware device.
    *
    * Strategy:
-   * 1. Try `aplay --dump-hw-params` (works for onboard / PCI cards)
+   * 1. Try `aplay --dump-hw-params` (works for some PCI cards)
    * 2. Fallback: parse `/proc/asound/cardN/stream0` (works for USB audio)
-   * 3. Fallback: try hw_params with empty ASOUNDRC to bypass broken asound.conf
+   * 3. Fallback: hw_params with empty ASOUNDRC (bypass broken asound.conf)
+   * 4. Fallback: amixer 'Playback Channel Map' values count (HDA codecs)
    */
   private async detectMaxChannels(hwDevice: string): Promise<number> {
+    const cardMatch = hwDevice.match(/hw:(\d+)(?:,(\d+))?/);
+    const cardId = cardMatch?.[1] ?? '0';
+    const deviceId = cardMatch?.[2] ?? '0';
+
     // --- Strategy 1: hw_params ---
     try {
       const output = await this.execShellCommand(
         `aplay -D ${hwDevice} --dump-hw-params /dev/null 2>&1 || true`,
       );
-      // Look for CHANNELS line, e.g.: "CHANNELS: [2 8]" or "CHANNELS: 2"
       const chMatch = output.match(/CHANNELS:\s*(?:\[(\d+)\s+(\d+)\]|(\d+))/i);
       if (chMatch) {
         const max = chMatch[2] || chMatch[3] || chMatch[1];
@@ -256,22 +260,18 @@ export class AudioDeviceScanner {
     }
 
     // --- Strategy 2: /proc/asound/cardN/stream0 (USB devices) ---
-    const cardMatch = hwDevice.match(/hw:(\d+)/);
-    if (cardMatch) {
-      try {
-        const streamPath = `/proc/asound/card${cardMatch[1]}/stream0`;
-        const stream = await this.execShellCommand(`cat ${streamPath} 2>/dev/null || true`);
-        // Find all "Channels: N" lines in Playback section and take the maximum
-        const playbackSection = stream.split(/Capture:/i)[0] || stream;
-        const channelMatches = [...playbackSection.matchAll(/Channels:\s*(\d+)/gi)];
-        if (channelMatches.length > 0) {
-          const maxCh = Math.max(...channelMatches.map((m) => parseInt(m[1], 10)));
-          this.log.debug('Detected max channels via stream0', { hwDevice, maxChannels: maxCh });
-          return maxCh;
-        }
-      } catch {
-        // stream0 not available
+    try {
+      const streamPath = `/proc/asound/card${cardId}/stream0`;
+      const stream = await this.execShellCommand(`cat ${streamPath} 2>/dev/null || true`);
+      const playbackSection = stream.split(/Capture:/i)[0] || stream;
+      const channelMatches = [...playbackSection.matchAll(/Channels:\s*(\d+)/gi)];
+      if (channelMatches.length > 0) {
+        const maxCh = Math.max(...channelMatches.map((m) => parseInt(m[1], 10)));
+        this.log.debug('Detected max channels via stream0', { hwDevice, maxChannels: maxCh });
+        return maxCh;
       }
+    } catch {
+      // stream0 not available (HDA cards don't have it)
     }
 
     // --- Strategy 3: hw_params with empty config (bypass broken asound.conf) ---
@@ -290,6 +290,32 @@ export class AudioDeviceScanner {
       }
     } catch {
       // still failed
+    }
+
+    // --- Strategy 4: amixer 'Playback Channel Map' values count (HDA codecs) ---
+    // amixer reports e.g.: "values=6" for a 5.1 card, and chmap-fixed lines
+    try {
+      const output = await this.execShellCommand(
+        `amixer -c ${cardId} contents 2>/dev/null | grep -A5 "'Playback Channel Map',device=${deviceId}$" || true`,
+      );
+      // Parse "values=N" — that's the channel count
+      const valuesMatch = output.match(/values=(\d+)/);
+      if (valuesMatch) {
+        const val = parseInt(valuesMatch[1], 10);
+        if (val > 0) {
+          this.log.debug('Detected max channels via amixer channel map', { hwDevice, maxChannels: val });
+          return val;
+        }
+      }
+      // Or parse chmap-fixed lines and count the longest one
+      const chmapMatches = [...output.matchAll(/chmap-fixed=([A-Z,]+)/g)];
+      if (chmapMatches.length > 0) {
+        const maxCh = Math.max(...chmapMatches.map((m) => m[1].split(',').length));
+        this.log.debug('Detected max channels via amixer chmap', { hwDevice, maxChannels: maxCh });
+        return maxCh;
+      }
+    } catch {
+      // amixer not available
     }
 
     this.log.debug('Could not detect max channels, defaulting to 2', { hwDevice });
