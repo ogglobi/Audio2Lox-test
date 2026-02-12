@@ -1,6 +1,11 @@
 import crypto from 'crypto';
 
-const pkceState = new Map<string, string>();
+export interface PkceSession {
+  verifier: string;
+  redirectUri: string;
+}
+
+const pkceState = new Map<string, PkceSession>();
 
 function base64UrlEncode(buffer: Buffer): string {
   return buffer
@@ -10,17 +15,17 @@ function base64UrlEncode(buffer: Buffer): string {
     .replace(/=+$/g, '');
 }
 
-export function createPkcePair(stateKey: string): { codeChallenge: string } {
+export function createPkcePair(stateKey: string, redirectUri: string): { codeChallenge: string } {
   const verifier = base64UrlEncode(crypto.randomBytes(32));
   const challenge = base64UrlEncode(crypto.createHash('sha256').update(verifier).digest());
-  pkceState.set(stateKey, verifier);
+  pkceState.set(stateKey, { verifier, redirectUri });
   return { codeChallenge: challenge };
 }
 
-export function consumePkceVerifier(stateKey: string): string | undefined {
-  const verifier = pkceState.get(stateKey);
-  if (verifier) {
+export function consumePkceVerifier(stateKey: string): PkceSession | undefined {
+  const session = pkceState.get(stateKey);
+  if (session) {
     pkceState.delete(stateKey);
   }
-  return verifier;
+  return session;
 }
