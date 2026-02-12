@@ -233,6 +233,7 @@ export class AudioDeviceScanner {
    * Strategy:
    * 1. Try `aplay --dump-hw-params` (works for onboard / PCI cards)
    * 2. Fallback: parse `/proc/asound/cardN/stream0` (works for USB audio)
+   * 3. Fallback: try hw_params with empty ASOUNDRC to bypass broken asound.conf
    */
   private async detectMaxChannels(hwDevice: string): Promise<number> {
     // --- Strategy 1: hw_params ---
@@ -271,6 +272,24 @@ export class AudioDeviceScanner {
       } catch {
         // stream0 not available
       }
+    }
+
+    // --- Strategy 3: hw_params with empty config (bypass broken asound.conf) ---
+    try {
+      const output = await this.execShellCommand(
+        `ASOUNDRC=/dev/null aplay -D ${hwDevice} --dump-hw-params /dev/null 2>&1 || true`,
+      );
+      const chMatch = output.match(/CHANNELS:\s*(?:\[(\d+)\s+(\d+)\]|(\d+))/i);
+      if (chMatch) {
+        const max = chMatch[2] || chMatch[3] || chMatch[1];
+        if (max) {
+          const val = parseInt(max, 10);
+          this.log.debug('Detected max channels via hw_params (empty config)', { hwDevice, maxChannels: val });
+          return val;
+        }
+      }
+    } catch {
+      // still failed
     }
 
     this.log.debug('Could not detect max channels, defaulting to 2', { hwDevice });

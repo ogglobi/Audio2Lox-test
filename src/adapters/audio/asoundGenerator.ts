@@ -205,8 +205,7 @@ function buildAsoundConf(cards: AudioDevice[]): {
 
   // Include local overrides if present
   lines.push(
-    `# Include local customisations (optional)`,
-    `<confdir:/etc/asound.local.conf>`,
+    `# To add local customisations, create /etc/asound.local.conf`,
     '',
   );
 
