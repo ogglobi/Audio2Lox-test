@@ -61,6 +61,8 @@ export interface RadioContentConfig {
 
 export interface SpotifyContentConfig {
   clientId?: string;
+  /** HTTPS redirect page for Spotify OAuth (GitHub Pages URL that forwards code to local callback). */
+  redirectPage?: string;
   accounts: SpotifyAccountConfig[];
   bridges: SpotifyBridgeConfig[];
 }

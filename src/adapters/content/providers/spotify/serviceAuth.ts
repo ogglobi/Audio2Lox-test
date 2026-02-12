@@ -6,7 +6,7 @@ import { safeReadText } from '@/shared/bestEffort';
 import type { SpotifyAccountConfig } from '@/domain/config/types';
 import type { ContentManager } from '@/adapters/content/contentManager';
 import { consumePkceVerifier } from '@/adapters/content/providers/spotify/pkce';
-import { resolveSpotifyClientId, DEFAULT_SPOTIFY_CLIENT_ID } from '@/adapters/content/providers/spotify/utils';
+import { resolveSpotifyClientId } from '@/adapters/content/providers/spotify/utils';
 import {
   generateLibrespotCredentialsFromOAuth,
 } from '@/adapters/inputs/spotify/spotifyStreamingService';
@@ -19,7 +19,7 @@ import type { SpotifyInputService } from '@/adapters/inputs/spotify/spotifyInput
 import { pushLibrespotCredentials } from '@/adapters/inputs/spotify/spotifyInputService';
 import type { ConfigPort } from '@/ports/ConfigPort';
 
-const SPOTIFY_PUBLIC_REDIRECT_URI =
+const SPOTIFY_DEFAULT_REDIRECT_PAGE =
   'https://rudyberends.github.io/lox-audioserver/spotify-callback';
 
 const log = createLogger('Content', 'SpotifyAuth');
@@ -31,27 +31,17 @@ interface BuildLinkParams {
 export function buildSpotifyAuthLink(params: BuildLinkParams, configPort: ConfigPort): string {
   const cfg = configPort.getConfig();
   const clientId = resolveSpotifyClientId(cfg.content?.spotify);
-  const isCustomClientId = clientId !== DEFAULT_SPOTIFY_CLIENT_ID;
+
+  // Spotify requires HTTPS redirect URIs (except localhost).
+  // We use an HTTPS redirect page (GitHub Pages) that forwards code+state
+  // to our local HTTP callback.  Configurable via content.spotify.redirectPage.
+  const redirectPage =
+    cfg.content?.spotify?.redirectPage?.trim() || SPOTIFY_DEFAULT_REDIRECT_PAGE;
 
   const stateKey = `content:spotify:${crypto.randomBytes(8).toString('hex')}`;
+  const localCallbackUrl = `http://${params.audioServerHost}:7090/admin/api/spotify/auth/callback?state=${stateKey}`;
 
-  // Custom client ID: redirect directly to our local callback endpoint.
-  // Default client ID: use the external GitHub Pages redirect (upstream).
-  let redirectUri: string;
-  let spotifyState: string;
-
-  if (isCustomClientId) {
-    // Direct redirect — user must register this URL in their Spotify dashboard
-    redirectUri = `http://${params.audioServerHost}:7090/admin/api/spotify/auth/callback`;
-    spotifyState = stateKey;
-  } else {
-    // Indirect redirect via external page that forwards code+state to our callback
-    redirectUri = SPOTIFY_PUBLIC_REDIRECT_URI;
-    const localCallbackUrl = `http://${params.audioServerHost}:7090/admin/api/spotify/auth/callback?state=${stateKey}`;
-    spotifyState = encodeURIComponent(localCallbackUrl);
-  }
-
-  const { codeChallenge } = createPkcePair(stateKey, redirectUri);
+  const { codeChallenge } = createPkcePair(stateKey, redirectPage);
 
   const scope = [
     'playlist-read-private',
@@ -74,15 +64,15 @@ export function buildSpotifyAuthLink(params: BuildLinkParams, configPort: Config
   const paramsStr = new URLSearchParams({
     client_id: clientId,
     response_type: 'code',
-    redirect_uri: redirectUri,
+    redirect_uri: redirectPage,
     scope,
     code_challenge_method: 'S256',
     code_challenge: codeChallenge,
-    state: spotifyState,
+    state: encodeURIComponent(localCallbackUrl),
   });
 
   const link = `https://accounts.spotify.com/authorize?${paramsStr.toString()}`;
-  log.debug('Built Spotify auth link', { isCustomClientId });
+  log.debug('Built Spotify auth link', { redirectPage });
   return link;
 }
 
