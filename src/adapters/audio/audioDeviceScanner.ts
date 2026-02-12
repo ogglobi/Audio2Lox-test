@@ -294,9 +294,14 @@ export class AudioDeviceScanner {
 
     // --- Strategy 4: amixer 'Playback Channel Map' values count (HDA codecs) ---
     // amixer reports e.g.: "values=6" for a 5.1 card, and chmap-fixed lines
+    // NOTE: amixer omits ",device=0" for the default device, so we must handle both forms
     try {
+      const grepPattern =
+        deviceId === '0'
+          ? `-E "'Playback Channel Map'(,device=0)?$"` // device 0 may or may not have suffix
+          : `"'Playback Channel Map',device=${deviceId}$"`;
       const output = await this.execShellCommand(
-        `amixer -c ${cardId} contents 2>/dev/null | grep -A5 "'Playback Channel Map',device=${deviceId}$" || true`,
+        `amixer -c ${cardId} contents 2>/dev/null | grep -A5 ${grepPattern} || true`,
       );
       // Parse "values=N" — that's the channel count
       const valuesMatch = output.match(/values=(\d+)/);
